@@ -8,6 +8,12 @@ android {
 
     defaultConfig {
         minSdk = 28
+        externalNativeBuild {
+            cmake {
+                // LSPlant's prefab package ships a shared-STL library
+                arguments += "-DANDROID_STL=c++_shared"
+            }
+        }
         ndk {
             // ShadowHook supports thumb/arm32 and arm64 only
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
