@@ -41,6 +41,8 @@
 #include <elf.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 
 #include <cerrno>
 #include <cinttypes>
@@ -283,7 +285,7 @@ private:
     int fd_ = -1;
     bool is64_ = false;
     // Reserved for future diagnostics (first matched exact symbol name).
-    const char* found_first_ = nullptr;
+    mutable const char* found_first_ = nullptr;
 };
 
 static std::once_flag g_art_once;
