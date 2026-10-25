@@ -46,6 +46,11 @@ jobs:
         run: |
           if [ -n "$CF_KEYSTORE_BASE64" ]; then
             echo "$CF_KEYSTORE_BASE64" | base64 -d > /tmp/cf-release.keystore
+            {
+              printf 'CF_KEYSTORE_PASS=%s\n' "$CF_KEYSTORE_PASS"
+              printf 'CF_KEY_ALIAS=%s\n' "$CF_KEY_ALIAS"
+              printf 'CF_KEY_PASS=%s\n' "$CF_KEY_PASS"
+            } >> "$GITHUB_ENV"
           else
             keytool -genkeypair -v -keystore /tmp/cf-release.keystore \
               -alias cloneforge -keyalg RSA -keysize 2048 -validity 10000 \

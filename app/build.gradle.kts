@@ -22,7 +22,10 @@ android {
     signingConfigs {
         create("ci") {
             val ks = env["CF_KEYSTORE_FILE"]
-            if (ks != null && File(ks).exists()) {
+            if (ks != null && File(ks).exists() &&
+                env["CF_KEYSTORE_PASS"] != null && env["CF_KEY_PASS"] != null &&
+                env["CF_KEY_ALIAS"] != null
+            ) {
                 storeFile = file(ks)
                 storePassword = env["CF_KEYSTORE_PASS"]
                 keyAlias = env["CF_KEY_ALIAS"]
@@ -33,12 +36,16 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
-            signingConfig = if (env["CF_KEYSTORE_FILE"] != null) {
+            val ks = env["CF_KEYSTORE_FILE"]
+            val ciSignable = ks != null && java.io.File(ks).exists() &&
+                    env["CF_KEYSTORE_PASS"] != null && env["CF_KEY_PASS"] != null &&
+                    env["CF_KEY_ALIAS"] != null
+            signingConfig = if (ciSignable) {
                 signingConfigs.getByName("ci")
             } else {
                 signingConfigs.getByName("debug")
             }
+            isMinifyEnabled = false
         }
     }
 
