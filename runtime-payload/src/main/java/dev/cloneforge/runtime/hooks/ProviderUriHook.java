@@ -1,7 +1,9 @@
 package dev.cloneforge.runtime.hooks;
 
 import android.net.Uri;
+import android.util.Log;
 
+import java.lang.reflect.Method;
 import java.util.Map;
 
 /**
@@ -18,9 +20,9 @@ import java.util.Map;
  *
  * Java-side LSPlant hooking of ContentResolver.acquireProvider / acquireExistingProvider /
  * acquireUnstableProvider + androidx FileProvider.getUriForFile is gated on
- * {@link dev.cloneforge.runtime.CloneRuntimeEngine#HAS_LSPLANT}. With the flag (verified) false,
- * the table still ships here and is consumed by PackageNameRouter's resource-identifier
- * rewrites and by any future ContentResolver bridge — nothing crashes in the meantime.
+ * {@link dev.cloneforge.runtime.CloneRuntimeEngine#HAS_LSPLANT}; when the C++ bridge init
+ * succeeded (see {@link dev.cloneforge.runtime.hooks.LsplantNative}), the hooks below rewrite
+ * the authority argument at the ART level before the original method runs.
  *
  * Pure Java: no androidx / Kotlin / BouncyCastle at runtime.
  */
@@ -117,21 +119,113 @@ public final class ProviderUriHook {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // LSPlant-gated resolver hooks (dormant; see CloneRuntimeEngine.HAS_LSPLANT)
+    // LSPlant-gated resolver hooks
     // ---------------------------------------------------------------------------------------------
     /**
-     * When LSPlant becomes available, hook these targets here (each in its own guarded block):
+     * Hooked targets when the bridge is live (each target individually guarded):
      * <ul>
-     *   <li>android.content.ContentResolver#acquireProvider(Context, String)/acquireExistingProvider/
-     *       acquireUnstableProvider — rewrite the authority argument via {@link #translateAuthority}.</li>
-     *   <li>android.content.ContentResolver#registerContentObserver / notifyChange — rewrite Uri args.</li>
-     *   <li>androidx.core.content.FileProvider (and android.support.v4.content.FileProvider)
-     *       #getUriForFile — rewrite the authority argument (spec §8 FileProvider row).</li>
+     *   <li>android.content.ContentResolver#acquireProvider / acquireExistingProvider /
+     *       acquireUnstableProvider (1- and 2-arg overloads; authority = LAST parameter) —
+     *       rewrite via {@link #translateAuthority}.</li>
+     *   <li>androidx.core.content.FileProvider and android.support.v4.content.FileProvider
+     *       #getUriForFile (authority = the first String parameter, i.e. always index 1) —
+     *       rewrite via {@link #translateAuthority}.</li>
      * </ul>
-     * Body intentionally empty today: the API could not be verified upstream (no Java facade),
-     * and a guessed signature is a crash risk.
+     * A single shared handler instance is fine because handlers are stateless; rewrites happen
+     * on a cloned args array so the caller's array is never mutated.
      */
     private static void installLsplantResolverHooks() {
-        // no-op by design (LSPlant unavailable upstream; see CloneRuntimeEngine javadoc)
+        final ProviderUriHook inst = getInstance();
+        if (inst == null) {
+            return;
+        }
+        int hooked = 0;
+
+        // ContentResolver acquire*Provider family — authority argument (last param) rewrite.
+        try {
+            Class<?> cr = Class.forName("android.content.ContentResolver");
+            for (Method m : cr.getDeclaredMethods()) {
+                String name = m.getName();
+                if (!"acquireProvider".equals(name) && !"acquireExistingProvider".equals(name)
+                        && !"acquireUnstableProvider".equals(name)) {
+                    continue;
+                }
+                int pc = m.getParameterCount();
+                Class<?>[] pts = m.getParameterTypes();
+                // Overloads: (Context, String) / (String) — the String authority is last.
+                if ((pc != 1 && pc != 2) || pts[pc - 1] != String.class) {
+                    continue;
+                }
+                final int authorityIndex = pc - 1;
+                HookerHandler rewrite = (hooker, args) -> {
+                    Object authority = args[authorityIndex];
+                    if (authority instanceof String) {
+                        String translated = inst.translateAuthority((String) authority);
+                        if (translated != null && !translated.equals(authority)) {
+                            Object[] rewritten = args.clone();
+                            rewritten[authorityIndex] = translated;
+                            return hooker.invokeBackup(rewritten);
+                        }
+                    }
+                    return hooker.invokeBackup(args);
+                };
+                if (Hooker.hook(m, rewrite) != null) {
+                    hooked++;
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "ProviderUriHook: ContentResolver acquire-hooks failed (degraded)", t);
+        }
+
+        // FileProvider.getUriForFile — androidx + legacy support library variants.
+        final String[] fileProviderClasses = {
+                "androidx.core.content.FileProvider",
+                "android.support.v4.content.FileProvider",
+        };
+        for (String fpClass : fileProviderClasses) {
+            try {
+                Class<?> fp = Class.forName(fpClass);
+                for (Method m : fp.getDeclaredMethods()) {
+                    if (!"getUriForFile".equals(m.getName())) {
+                        continue;
+                    }
+                    final int pc = m.getParameterCount();
+                    final Class<?>[] pts = m.getParameterTypes();
+                    int authorityIndex = -1;
+                    for (int i = 0; i < pc; i++) {
+                        if (pts[i] == String.class) {
+                            authorityIndex = i; // first String param = authority
+                            break;
+                        }
+                    }
+                    if (authorityIndex < 0) {
+                        continue;
+                    }
+                    final int authIdx = authorityIndex;
+                    HookerHandler rewrite = (hooker, args) -> {
+                        Object authority = args[authIdx];
+                        if (authority instanceof String) {
+                            String translated = inst.translateAuthority((String) authority);
+                            if (translated != null && !translated.equals(authority)) {
+                                Object[] rewritten = args.clone();
+                                rewritten[authIdx] = translated;
+                                return hooker.invokeBackup(rewritten);
+                            }
+                        }
+                        return hooker.invokeBackup(args);
+                    };
+                    if (Hooker.hook(m, rewrite) != null) {
+                        hooked++;
+                    }
+                }
+            } catch (ClassNotFoundException absent) {
+                // support-v4 / androidx may not be on the classpath; fine.
+                Log.i(TAG, "ProviderUriHook: " + fpClass + " not present (skipped)");
+            } catch (Throwable t) {
+                Log.w(TAG, "ProviderUriHook: getUriForFile hook failed for " + fpClass, t);
+            }
+        }
+
+        Log.i(TAG, "ProviderUriHook: " + hooked + " resolver LSPlant hook(s) installed");
     }
 }

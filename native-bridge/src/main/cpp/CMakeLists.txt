@@ -17,6 +17,7 @@ add_library(
     cloneforge_core
     SHARED
     io_redirect.cpp
+    lsplant_bridge.cpp
 )
 
 target_link_libraries(

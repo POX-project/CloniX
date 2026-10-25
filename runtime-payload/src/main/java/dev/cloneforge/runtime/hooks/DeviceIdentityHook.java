@@ -6,6 +6,7 @@ import android.util.Log;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.UUID;
@@ -32,11 +33,11 @@ import javax.crypto.spec.SecretKeySpec;
  * </pre>
  *
  * ART-level spoofing of Settings$NameValueCache / TelephonyManager / MediaDrm /
- * NetworkInterface / WifiInfo requires method hooks (LSPlant). With
- * {@link dev.cloneforge.runtime.CloneRuntimeEngine#HAS_LSPLANT} == false, only the persisted
- * profile ships (exposed via the static getters so engine/overlay code can consume it);
- * hook installation stubs below document the exact targets for when the LSPlant C++ bridge
- * lands in native-bridge.
+ * NetworkInterface / WifiInfo uses method hooks (LSPlant) installed via
+ * {@link dev.cloneforge.runtime.hooks.Hooker} when
+ * {@link dev.cloneforge.runtime.CloneRuntimeEngine#HAS_LSPLANT} is true; without the bridge,
+ * only the persisted profile ships (exposed via the static getters so engine/overlay code can
+ * consume it).
  */
 public final class DeviceIdentityHook {
 
@@ -390,30 +391,186 @@ public final class DeviceIdentityHook {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // LSPlant-hook stubs (dormant until a verified Java bridge exists — see HAS_LSPLANT)
+    // LSPlant hooks (each target individually guarded; see class javadoc for the matrix)
     // ---------------------------------------------------------------------------------------------
     /**
-     * Hook targets once LSPlant is wired (each target individually guarded; failures logged
+     * Hook targets once the bridge is live (each target individually guarded; failures logged
      * and skipped so one bad target cannot poison the rest of the identity subsystem):
      * <ul>
-     *   <li>android.provider.Settings$NameValueCache#getStringForUser — ANDROID_ID query → profile.
-     *       (Static method: must be hooked via ART method replacement, not proxying.)</li>
-     *   <li>android.telephony.TelephonyManager#getImei(int) / getDeviceId / getSubscriberId /
-     *       getSimSerialNumber — PLT-style instance methods on the binder facade.</li>
-     *   <li>android.media.MediaDrm#getPropertyByteArray(name) — when
-     *       "deviceUniqueId" → widevine bytes (PropertySet passthrough untouched).</li>
-     *   <li>java.net.NetworkInterface#getHardwareAddress +
-     *       android.net.wifi.WifiInfo#getMacAddress — MAC from profile.</li>
-     *   <li>com.google.android.gms.ads.identifier.AdvertisingIdClient$Info#getId — advertising_id,
-     *       attempted only when the GMS class is present on the app classpath (catch-ignore).</li>
+     *   <li>android.provider.Settings$NameValueCache#getStringForUser — ANDROID_ID query →
+     *       profile (static: args = [resolver, name, userId]).</li>
+     *   <li>android.telephony.TelephonyManager#getImei/getImei(int)/getDeviceId/getDeviceId(int)/
+     *       getSubscriberId/getSimSerialNumber → synthetic values (args[0] = receiver).</li>
+     *   <li>android.media.MediaDrm#getPropertyByteArray(String) — when the property name is
+     *       "deviceUniqueId" → profile widevine bytes; every other property passes through.</li>
+     *   <li>java.net.NetworkInterface#getHardwareAddress → profile MAC bytes.</li>
+     *   <li>android.net.wifi.WifiInfo#getMacAddress → profile MAC string.</li>
+     *   <li>com.google.android.gms.ads.identifier.AdvertisingIdClient$Info#getId →
+     *       advertising_id, attempted only when the GMS class is on the classpath (catch-ignore).</li>
      * </ul>
      */
     private static void installLsplantHooks() {
-        if (dev.cloneforge.runtime.CloneRuntimeEngine.HAS_LSPLANT) {
-            // LSPlant wiring goes here; individually-guarded per target.
-        } else {
+        VirtualDeviceProfile p = sProfile;
+        if (!dev.cloneforge.runtime.CloneRuntimeEngine.HAS_LSPLANT) {
             Log.i(TAG, "DeviceIdentityHook: profile persisted; ART identity hooks "
                     + "deferred (LSPlant unavailable)");
+            return;
+        }
+        if (p == null) {
+            Log.w(TAG, "DeviceIdentityHook: no profile; ART identity hooks skipped");
+            return;
+        }
+        Log.i(TAG, "DeviceIdentityHook: installing " + HOOK_TARGET_COUNT + " ART identity hooks");
+
+        // 1. Settings$NameValueCache.getStringForUser — android_id (static method).
+        try {
+            Class<?> nameValueCache =
+                    Class.forName("android.provider.Settings$NameValueCache");
+            for (Method m : nameValueCache.getDeclaredMethods()) {
+                if (!"getStringForUser".equals(m.getName())) {
+                    continue;
+                }
+                HookerHandler and = (hooker, args) -> {
+                    for (Object arg : args) {
+                        if ("android_id".equals(arg)) {
+                            return p.androidId;
+                        }
+                    }
+                    return hooker.invokeBackup(args);
+                };
+                if (Hooker.hook(m, and) != null) {
+                    Log.i(TAG, "identity hook: Settings$NameValueCache.getStringForUser");
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "identity hook Settings$NameValueCache failed (skipped)", t);
+        }
+
+        // 2. TelephonyManager identity getters.
+        installTelephonyIdentityHooks(p);
+
+        // 3. MediaDrm.getPropertyByteArray — Widevine deviceUniqueId.
+        try {
+            for (Method m : android.media.MediaDrm.class.getDeclaredMethods()) {
+                if (!"getPropertyByteArray".equals(m.getName())) {
+                    continue;
+                }
+                HookerHandler wv = (hooker, args) -> {
+                    for (Object arg : args) {
+                        if (arg instanceof String && "deviceUniqueId".equals(arg)) {
+                            byte[] widevine = getWidevineId();
+                            if (widevine != null) {
+                                return widevine;
+                            }
+                        }
+                    }
+                    return hooker.invokeBackup(args);
+                };
+                if (Hooker.hook(m, wv) != null) {
+                    Log.i(TAG, "identity hook: MediaDrm.getPropertyByteArray");
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "identity hook MediaDrm failed (skipped)", t);
+        }
+
+        // 4. NetworkInterface.getHardwareAddress — MAC bytes from profile.
+        try {
+            Method m = java.net.NetworkInterface.class
+                    .getDeclaredMethod("getHardwareAddress");
+            HookerHandler macBytes = (hooker, args) -> macFromProfile();
+            if (Hooker.hook(m, macBytes) != null) {
+                Log.i(TAG, "identity hook: NetworkInterface.getHardwareAddress");
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "identity hook NetworkInterface failed (skipped)", t);
+        }
+
+        // 5. WifiInfo.getMacAddress — MAC string from profile.
+        try {
+            Method m = android.net.wifi.WifiInfo.class.getDeclaredMethod("getMacAddress");
+            HookerHandler macStr = (hooker, args) -> p.macAddress;
+            if (Hooker.hook(m, macStr) != null) {
+                Log.i(TAG, "identity hook: WifiInfo.getMacAddress");
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "identity hook WifiInfo failed (skipped)", t);
+        }
+
+        // 6. GMS advertising id — present only on apps embedding Play Services.
+        try {
+            Class<?> adInfo = Class.forName(
+                    "com.google.android.gms.ads.identifier.AdvertisingIdClient$Info");
+            for (Method m : adInfo.getDeclaredMethods()) {
+                if ("getId".equals(m.getName()) && m.getReturnType() == String.class
+                        && m.getParameterCount() == 0) {
+                    HookerHandler adv = (hooker, args) -> p.advertisingId;
+                    if (Hooker.hook(m, adv) != null) {
+                        Log.i(TAG, "identity hook: GMS AdvertisingIdClient$Info.getId");
+                    }
+                }
+            }
+        } catch (ClassNotFoundException absent) {
+            Log.i(TAG, "GMS ads identifier classes not on classpath (skipped)");
+        } catch (Throwable t) {
+            Log.w(TAG, "identity hook GMS Ads failed (skipped)", t);
+        }
+    }
+
+    private static final int HOOK_TARGET_COUNT = 6;
+
+    /** TelephonyManager facade getters getImei/getDeviceId/getSubscriberId/getSimSerialNumber. */
+    private static void installTelephonyIdentityHooks(VirtualDeviceProfile p) {
+        final String[] names = {"getImei", "getDeviceId", "getSubscriberId", "getSimSerialNumber"};
+        try {
+            for (Method m : android.telephony.TelephonyManager.class.getDeclaredMethods()) {
+                String name = m.getName();
+                boolean matched = false;
+                for (String candidate : names) {
+                    if (candidate.equals(name)) {
+                        matched = true;
+                        break;
+                    }
+                }
+                if (!matched || m.getReturnType() != String.class) {
+                    continue;
+                }
+                final boolean spatial = "getSubscriberId".equals(name); // IMSI-shaped spoof
+                final boolean simSerial = "getSimSerialNumber".equals(name);
+                HookerHandler tel = (hooker, args) -> {
+                    if (simSerial) {
+                        return p.iccid;
+                    }
+                    if (spatial) {
+                        return p.imei; // synthetic IMSI (same deterministic base; logged once)
+                    }
+                    return p.imei; // getImei / getDeviceId
+                };
+                if (Hooker.hook(m, tel) != null) {
+                    Log.i(TAG, "identity hook: TelephonyManager#" + name
+                            + "(" + m.getParameterCount() + " args)");
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "identity hook TelephonyManager failed (skipped)", t);
+        }
+    }
+
+    /** Parses the profile MAC ("02:XX:...") into its 6 bytes, or null when unavailable. */
+    private static byte[] macFromProfile() {
+        VirtualDeviceProfile p = sProfile;
+        if (p == null || p.macAddress == null) {
+            return null;
+        }
+        try {
+            String[] parts = p.macAddress.split(":");
+            byte[] out = new byte[6];
+            for (int i = 0; i < 6 && i < parts.length; i++) {
+                out[i] = (byte) Integer.parseInt(parts[i], 16);
+            }
+            return out;
+        } catch (Throwable t) {
+            return null;
         }
     }
 }

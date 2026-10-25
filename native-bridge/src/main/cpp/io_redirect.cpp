@@ -70,6 +70,15 @@ static std::atomic<bool> g_hooks_active{false};
 static std::atomic<bool> g_install_attempted{false};
 static std::atomic<bool> g_installing{false};
 
+static std::once_flag g_shadowhook_init_once;
+
+/** One-shot ShadowHero bootstrap shared with lsplant_bridge.cpp (LSPlant inline hooks). */
+extern "C" void cf_shadowhook_ensure_init() {
+    std::call_once(g_shadowhook_init_once, []() {
+        shadowhook_init(SHADOWHOOK_MODE_UNIQUE, false);
+    });
+}
+
 static bool is_TrustedSystemCaller(void* caller_addr) {
     Dl_info info;
     if (dladdr(caller_addr, &info) && info.dli_fname != nullptr) {
@@ -212,7 +221,7 @@ static int hooked_fstatat64(int dirfd, const char* pathname, struct stat64* buf,
 // Performs the one-shot ShadowHook installation. Returns true when every needed hook landed.
 static bool install_Hooks_Internal() {
     g_installing.store(true, std::memory_order_release);
-    shadowhook_init(SHADOWHOOK_MODE_UNIQUE, false);
+    cf_shadowhook_ensure_init();
 
     bool openat_hooked = false;
     bool faccessat_hooked = false;

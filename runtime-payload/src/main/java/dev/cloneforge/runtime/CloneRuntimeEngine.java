@@ -51,18 +51,20 @@ public final class CloneRuntimeEngine {
     /**
      * LSPlant Java-side integration flag.
      *
-     * VERIFIED 2026-10-25 against upstream https://github.com/LSPosed/LSPlant (master):
-     * the repository ships a C++-only API (lsplant/src/main/jni/include/lsplant.hpp,
-     * lsplant::Init / lsplant::Hook driven from your own native code). There is NO upstream
-     * org.lsposed.lsplant.LSPlant Java wrapper class to mirror (its Java test classes
-     * Hooker.java / Replacement.java are merely hooker objects passed INTO the C++ Hook()).
+     * Set to {@code true} ONLY after a successful {@link dev.cloneforge.runtime.hooks.LsplantNative}-bridge init
+     * ({@code lsplant::Init} via the C++ side in native-bridge/src/main/cpp/lsplant_bridge.cpp).
+     * Mirrored v6.4 C++ API: lsplant::Init(JNIEnv*, const InitInfo&{inline_hooker,
+     * inline_unhooker, art_symbol_resolver, generated_class_name="LSPHooker_", ...}),
+     * lsplant::Hook(JNIEnv*, target, hookerObject, callbackMethod) -> backup Method,
+     * lsplant::UnHook / lsplant::Deoptimize.
      *
-     * Therefore, per the integration specification: hasLsplant = false and all LSPlant-gated
-     * hooks degrade to their documented reflection/table fallbacks. If a future integrator
-     * adds an LSPlant C++ bridge (e.g. inside native-bridge), flip this flag and wire
-     * PackageNameRouter/ProviderUriHook/DeviceIdentityHook accordingly.
+     * Flipped inside {@link #ensureNativeLoaded()} right after {@link #nativeInitHooks} so the
+     * ShadowHook openat/faccessat/fstatat64 hooks are live BEFORE LSPlant inline-hooks ART
+     * internals (required ordering: loadLibrary -> nativeInitHooks -> LSPlant init -> LSPlant
+     * hooks). On any failure the flag stays false and PackageNameRouter / ProviderUriHook /
+     * DeviceIdentityHook degrade to their reflection/table fallbacks as documented.
      */
-    public static final boolean HAS_LSPLANT = false;
+    public static volatile boolean HAS_LSPLANT = false;
 
     private static final String ASSET_DIR_SUFFIX = "/files";
     private static final String ORIGIN_APK_FILENAME = ".cf_origin_base.apk";
@@ -337,8 +339,7 @@ public final class CloneRuntimeEngine {
             Log.e(TAG, "IntentRouterHook install failed (degraded)", t);
         }
 
-        // 6. Stack-aware getPackageName() router via LSPlant — currently DISABLED
-        //    (HAS_LSPLANT=false; see class javadoc).
+        // 6. Stack-aware getPackageName() router (LSPlant-gated; table/Binder fallback otherwise).
         try {
             PackageNameRouter.install(sConfig.origPkg, sConfig.clonePkg);
         } catch (Throwable t) {
@@ -378,6 +379,16 @@ public final class CloneRuntimeEngine {
             Log.e(TAG, "libcloneforge_core.so not found — native I/O redirection DISABLED", nle);
         } catch (Throwable t) {
             Log.e(TAG, "nativeInitHooks failed — native I/O redirection may be off", t);
+        }
+
+        // LSPlant init — MUST come after nativeInitHooks (ShadowHook inline hooker backing the
+        // LSPlant InitInfo) and BEFORE any LSPlant hook installation. On success HAS_LSPLANT
+        // flips true; otherwise the three gated subsystems degrade as documented.
+        try {
+            HAS_LSPLANT = dev.cloneforge.runtime.hooks.LsplantNative.initOnce();
+        } catch (Throwable t) {
+            Log.w(TAG, "LSPlant bridge init failed — ART-level hooks OFF (degraded)", t);
+            HAS_LSPLANT = false;
         }
     }
 }
