@@ -26,6 +26,7 @@ fi
 # 2. Dexify with d8 from the newest installed build-tools
 ANDROID_JAR="$(ls -v "$ANDROID_HOME"/platforms/*/android.jar | tail -n1)"
 D8="$(ls -v "$ANDROID_HOME"/build-tools/*/d8 | tail -n1)"
+mkdir -p "$WORK/dexout"
 "$D8" --release --lib "$ANDROID_JAR" --output "$WORK/dexout" "${JARS[@]}"
 mv "$WORK/dexout/classes.dex" "$ASSETS/runtime-payload.dex"
 
