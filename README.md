@@ -90,8 +90,8 @@ gh secret set CF_KEY_PASS    -R OWNER/CloniX
 - arm64-v8a / armeabi-v7a devices (the native engine only hooks thumb/arm32 + arm64).
 
 ## Roadmap
-- LSPlant-based ART hooks (package router, device-identity spoofing, ContentResolver/FileProvider
-  interception) — the native bridge already links `lsplant`; the payload has guarded stubs.
+- ✅ LSPlant-based ART hooks (package router, device-identity spoofing, ContentResolver/FileProvider
+  interception) — active since v1.1.0 via the shadowhook-backed C++ bridge in `native-bridge`.
 - Shizuku/ADB silent installer bridge (`USER_ACTION_NOT_REQUIRED` without being a device owner).
 - Account-authenticator XML rewriting (spec §8).
 
