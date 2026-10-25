@@ -37,7 +37,7 @@ android {
     buildTypes {
         release {
             val ks = env["CF_KEYSTORE_FILE"]
-            val ciSignable = ks != null && java.io.File(ks).exists() &&
+            val ciSignable = ks != null && File(ks).exists() &&
                     env["CF_KEYSTORE_PASS"] != null && env["CF_KEY_PASS"] != null &&
                     env["CF_KEY_ALIAS"] != null
             signingConfig = if (ciSignable) {
