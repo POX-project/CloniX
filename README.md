@@ -69,8 +69,20 @@ ci/prepare_payload.sh        # requires ANDROID_HOME with platforms + build-tool
 gradle :app:assembleRelease
 ```
 
-For reproducible release signing on CI, add repository secrets:
-`CF_KEYSTORE_BASE64`, `CF_KEYSTORE_PASS`, `CF_KEY_ALIAS`, `CF_KEY_PASS`.
+Release signing already works out of the box: CI resolves repository secrets
+`CF_KEYSTORE_BASE64`, `CF_KEYSTORE_PASS`, `CF_KEY_ALIAS`, `CF_KEY_PASS` (the project's stable
+RSA-2048 key, so successive release APKs upgrade in place without "signature mismatch").
+If no secrets are set, CI falls back to an ephemeral keystore (fresh key per run). To use your
+own key, generate one and set the four secrets yourself:
+
+```bash
+keytool -genkeypair -v -keystore my.rks -alias cloneforge -keyalg RSA -keysize 2048 \
+  -validity 10000 -dname "CN=CloniX Release"
+base64 -w0 my.rks | gh secret set CF_KEYSTORE_BASE64 -R OWNER/CloniX --body "$(cat -)"
+gh secret set CF_KEYSTORE_PASS -R OWNER/CloniX
+gh secret set CF_KEY_ALIAS   -R OWNER/CloniX
+gh secret set CF_KEY_PASS    -R OWNER/CloniX
+```
 
 ## Install requirements
 - Android 9.0+ (API 28)
