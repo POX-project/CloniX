@@ -20,6 +20,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.button.MaterialButton
@@ -100,7 +101,7 @@ class MainActivity : AppCompatActivity() {
     /** Reacts to live clone events (e.g. a clone finished) by refreshing the history list. */
     private fun collectCloneBus() {
         lifecycleScope.launch {
-            androidx.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 CloneBus.events.collect { event ->
                     if (event.finished) {
                         renderHistory()
@@ -149,7 +150,7 @@ class MainActivity : AppCompatActivity() {
                     val launch = pm.getLaunchIntentForPackage(info.packageName)
                     if (launch == null) return@mapNotNull null
                     AppItem(
-                        label = info.loadLabel(pm).toString(),
+                        label = ai.loadLabel(pm).toString(),
                         packageName = info.packageName,
                         icon = ai.loadIcon(pm),
                         isSystem = (ai.flags and ApplicationInfo.FLAG_SYSTEM) != 0

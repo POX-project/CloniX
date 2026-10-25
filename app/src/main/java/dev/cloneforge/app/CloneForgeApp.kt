@@ -18,6 +18,8 @@ class CloneForgeApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Material 3 dynamic color: palette is derived from the user's wallpaper on 12+
+        com.google.android.material.color.DynamicColors.applyToActivitiesIfAvailable(this)
         ensureChannels(this)
     }
 

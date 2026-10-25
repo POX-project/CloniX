@@ -282,7 +282,7 @@ private class NotificationFactory(context: CloneService) {
             context,
             1,
             Intent(context, MainActivity::class.java).addFlags(
-                Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_UPDATE_CURRENT
+                Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             ),
             android.app.PendingIntent.FLAG_IMMUTABLE
         )

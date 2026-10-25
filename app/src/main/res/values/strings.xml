@@ -1,8 +1,8 @@
 <resources>
-    <string name="app_name">CloneForge</string>
+    <string name="app_name">CloniX</string>
 
     <!-- Main screen -->
-    <string name="app_title">CloneForge</string>
+    <string name="app_title">CloniX</string>
     <string name="app_subtitle">Install true multi-instance copies of your apps — every clone gets its own package, its own data and its own icon.</string>
     <string name="hint_search">Search installed apps</string>
     <string name="title_installed_apps">Installed apps</string>
@@ -29,7 +29,7 @@
     <string name="uninstall">Uninstall</string>
 
     <!-- Permissions and dialogs -->
-    <string name="install_permission_rationale">CloneForge needs the “install unknown apps” permission before it can install a cloned APK.</string>
+    <string name="install_permission_rationale">CloniX needs the “install unknown apps” permission before it can install a cloned APK.</string>
     <string name="toast_open_settings_failed">Could not open the permission page — enable it from system settings.</string>
     <string name="toast_clone_not_installed">This clone is not installed (it was removed?)</string>
     <plurals name="toast_clones_started">
@@ -54,7 +54,7 @@
     <string name="notif_install_success_title">Clone installed: %1$s</string>
     <string name="notif_install_success_text">The clone has been installed successfully. Launch it from the launcher or the “Your clones” list.</string>
     <string name="notif_install_failed_title">Clone install failed: %1$s</string>
-    <string name="notif_install_failed_generic">CloneForge could not complete the install.</string>
+    <string name="notif_install_failed_generic">CloniX could not complete the install.</string>
 
     <!-- Clone steps surfaced in the notification/bus -->
     <string name="clone_step_starting">Starting…</string>

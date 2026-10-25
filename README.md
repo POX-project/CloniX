@@ -1,19 +1,19 @@
-# CloneForge
+# CloniX
 
-[![CI](https://github.com/txorav/CloneForge/actions/workflows/build.yml/badge.svg)](https://github.com/txorav/CloneForge/actions/workflows/build.yml)
+[![CI](https://github.com/txorav/CloniX/actions/workflows/build.yml/badge.svg)](https://github.com/txorav/CloniX/actions/workflows/build.yml)
 
-**True multi-instance app cloning for Android 9+ (API 28 – 36).** CloneForge is an open-source
-Android application that clones installed apps into *real* APK installs — every clone gets its own
+**True multi-instance app cloning for Android 9+ (API 28 – 36).** CloniX (the CloneForge engine, GPL-3.0)
+is an open-source Android application that clones installed apps into *real* APK installs — every clone gets its own
 Linux UID, SELinux domain, storage sandbox, runtime permissions, and launcher icon — powered by
 static binary package mutation and an injected in-process compatibility runtime.
 
-CloneForge avoids the fatal on modern Android (12–16) limits of legacy virtual-container cloners
+CloniX avoids the fatal on modern Android (12–16) limits of legacy virtual-container cloners
 (VirtualApp-style Binder UID mismatches, phantom process killing, keystore2 alias collisions,
 shared storage): each clone is a **first-class citizen of the OS itself**.
 
 ## How it works
 
-### Builder pipeline (runs inside CloneForge)
+### Builder pipeline (runs inside CloniX)
 1. **Ingest** the installed app (base + split APKs), extract the original X.509 certificate and
    the raw V2/V3 APK Signing Block.
 2. **Mutate the binary AndroidManifest.xml** with [ARSCLib]: rename the package
@@ -46,7 +46,7 @@ The payload dex executes before `Application.attachBaseContext()` via `AppCompon
 ## Modules
 
 ```
-app/             CloneForge UI (Material 3): app picker, clone options, history, installer flow
+app/             CloniX UI (Material 3): app picker, clone options, history, installer flow
 patcher/         Mirror binary engine: ingest, AXML/ARSC mutation, dex+libs injection, signing, installer
 runtime-payload/ Pure-Java payload dex injected into clones (CFComponentFactory, hooks)
 native-bridge/   NDK hook engine (ShadowHook), 16 KB page-aligned, arm64-v7a/arm64-v8a
@@ -74,7 +74,7 @@ For reproducible release signing on CI, add repository secrets:
 
 ## Install requirements
 - Android 9.0+ (API 28)
-- Grant **"Install unknown apps"** for CloneForge (standard `REQUEST_INSTALL_PACKAGES` flow).
+- Grant **"Install unknown apps"** for CloniX (standard `REQUEST_INSTALL_PACKAGES` flow).
 - arm64-v8a / armeabi-v7a devices (the native engine only hooks thumb/arm32 + arm64).
 
 ## Roadmap
@@ -88,7 +88,7 @@ PRs welcome. For design changes, please open an issue first so the architecture 
 discussed before implementation.
 
 ## Legal / ethical notice
-CloneForge is a technical research tool for legitimate multi-account use of apps **you are
+CloniX is a technical research tool for legitimate multi-account use of apps **you are
 entitled to use** — a personal productivity need, QA testing, accessibility, or recovering from
 vendor account limits, for example. You are responsible for complying with the terms of service
 of the apps you clone, applicable law, and intellectual property. The tool does not distribute
