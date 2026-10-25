@@ -1,0 +1,61 @@
+<resources>
+    <string name="app_name">CloneForge</string>
+
+    <!-- Main screen -->
+    <string name="app_title">CloneForge</string>
+    <string name="app_subtitle">Install true multi-instance copies of your apps — every clone gets its own package, its own data and its own icon.</string>
+    <string name="hint_search">Search installed apps</string>
+    <string name="title_installed_apps">Installed apps</string>
+    <string name="switch_include_system">System</string>
+    <string name="empty_app_list">No matching apps found.</string>
+    <string name="loading_apps">Loading apps…</string>
+
+    <!-- Clone bottom sheet -->
+    <string name="sheet_title_arg">Clone: %1$s</string>
+    <string name="sheet_hint_pattern">Final labels look like “Label #1”, “Label #2” …</string>
+    <string name="hint_label_prefix">Label prefix</string>
+    <string name="label_clone_count">Number of clones</string>
+    <string name="label_hue_shift">Hue-shifted icons</string>
+    <string name="label_hue_shift_hint">Icons tinted 120° apart per clone</string>
+    <string name="button_start_clones">Start clones</string>
+
+    <!-- Clone history -->
+    <string name="title_your_clones">Your clones</string>
+    <string name="no_clones_yet">No clones yet — pick an app above to forge the first one.</string>
+    <string name="button_open">Open</string>
+    <string name="button_uninstall">Uninstall</string>
+    <string name="uninstall_title">Uninstall clone</string>
+    <string name="uninstall_message_arg">Remove %1$s from this device?</string>
+    <string name="uninstall">Uninstall</string>
+
+    <!-- Permissions and dialogs -->
+    <string name="install_permission_rationale">CloneForge needs the “install unknown apps” permission before it can install a cloned APK.</string>
+    <string name="toast_open_settings_failed">Could not open the permission page — enable it from system settings.</string>
+    <string name="toast_clone_not_installed">This clone is not installed (it was removed?)</string>
+    <plurals name="toast_clones_started">
+        <item quantity="one">Forging 1 clone of %2$s…</item>
+        <item quantity="other">Forging %1$d clones of %2$s…</item>
+    </plurals>
+
+    <!-- Notification channels -->
+    <string name="notif_channel_clone_jobs">Clone jobs</string>
+    <string name="notif_channel_clone_jobs_desc">Live progress while clones are being built and installed.</string>
+    <string name="notif_channel_install_jobs">Install results</string>
+    <string name="notif_channel_install_jobs_desc">Final result of every clone install.</string>
+
+    <!-- Service + receiver notifications -->
+    <string name="notif_clone_running_title">Cloning in progress</string>
+    <string name="notif_preparing">Preparing clone…</string>
+    <string name="notif_clone_progress_arg">Clone %1$d of %2$d · %3$s</string>
+    <string name="notif_clone_installed_title">Clone installed: %1$s</string>
+    <string name="notif_clone_failed_title">Clone failed: %1$s</string>
+    <string name="notif_confirm_title">Confirmation needed: %1$s</string>
+    <string name="notif_confirm_text">Tap to approve the install from Android (or use the dialog just opened).</string>
+    <string name="notif_install_success_title">Clone installed: %1$s</string>
+    <string name="notif_install_success_text">The clone has been installed successfully. Launch it from the launcher or the “Your clones” list.</string>
+    <string name="notif_install_failed_title">Clone install failed: %1$s</string>
+    <string name="notif_install_failed_generic">CloneForge could not complete the install.</string>
+
+    <!-- Clone steps surfaced in the notification/bus -->
+    <string name="clone_step_starting">Starting…</string>
+</resources>

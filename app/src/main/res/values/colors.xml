@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_launcher_background">#1B1F2E</color>
+
+    <!-- CloneForge brand accents -->
+    <color name="cf_primary">#B69CFF</color>
+    <color name="cf_on_primary">#28174A</color>
+    <color name="cf_surface_dim">#151823</color>
+</resources>

@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build runtime payload + native bridge
+        run: gradle :runtime-payload:assembleRelease :native-bridge:assembleRelease --stacktrace
+
+      - name: Pack payload assets (dex + native libs)
+        run: |
+          chmod +x ci/prepare_payload.sh
+          ci/prepare_payload.sh
+
+      - name: Prepare signing keystore
+        env:
+          CF_KEYSTORE_BASE64: ${{ secrets.CF_KEYSTORE_BASE64 }}
+          CF_KEYSTORE_PASS: ${{ secrets.CF_KEYSTORE_PASS }}
+          CF_KEY_ALIAS: ${{ secrets.CF_KEY_ALIAS }}
+          CF_KEY_PASS: ${{ secrets.CF_KEY_PASS }}
+        run: |
+          if [ -n "$CF_KEYSTORE_BASE64" ]; then
+            echo "$CF_KEYSTORE_BASE64" | base64 -d > /tmp/cf-release.keystore
+          else
+            keytool -genkeypair -v -keystore /tmp/cf-release.keystore \
+              -alias cloneforge -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass cloneforge-ci-pass -keypass cloneforge-ci-pass \
+              -dname "CN=CloneForge CI, O=CloneForge, C=US"
+            echo "CF_KEYSTORE_PASS=cloneforge-ci-pass" >> "$GITHUB_ENV"
+            echo "CF_KEY_ALIAS=cloneforge" >> "$GITHUB_ENV"
+            echo "CF_KEY_PASS=cloneforge-ci-pass" >> "$GITHUB_ENV"
+          fi
+          env_file="$GITHUB_ENV"
+          {
+            printf 'CF_KEYSTORE_FILE=%s\n' /tmp/cf-release.keystore
+          } >> "$env_file"
+
+      - name: Build app APK
+        run: gradle :app:assembleRelease -x lint --stacktrace
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CloneForge-apk
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app/build/outputs/apk/release/*.apk
+          generate_release_notes: true
