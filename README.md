@@ -94,7 +94,7 @@ gh secret set CF_KEY_PASS    -R OWNER/CloniX
 - ✅ LSPlant-based ART hooks (package router, device-identity spoofing, ContentResolver/FileProvider
   interception) — active since v1.1.0 via the shadowhook-backed C++ bridge in `native-bridge`.
 - ✅ Account-authenticator & SyncAdapter XML rewriting and runtime virtualization (spec §8).
-- Shizuku/ADB silent installer bridge (`USER_ACTION_NOT_REQUIRED` without being a device owner).
+- ✅ Shizuku/ADB silent installer bridge (`USER_ACTION_NOT_REQUIRED` without being a device owner; streamed stdin session pipelining via `pm install-write -S`).
 
 ## Language & contributing
 PRs welcome. For design changes, please open an issue first so the architecture direction is

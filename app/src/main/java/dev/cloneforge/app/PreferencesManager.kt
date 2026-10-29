@@ -33,6 +33,10 @@ class PreferencesManager(context: Context) {
         get() = prefs.getBoolean(KEY_BADGE_ICONS, true)
         set(value) = prefs.edit().putBoolean(KEY_BADGE_ICONS, value).apply()
 
+    var isShizukuInstallEnabled: Boolean
+        get() = prefs.getBoolean(KEY_SHIZUKU_INSTALL, dev.cloneforge.patcher.installer.ShizukuInstaller.isShizukuPermissionGranted())
+        set(value) = prefs.edit().putBoolean(KEY_SHIZUKU_INSTALL, value).apply()
+
     var isRootInstallEnabled: Boolean
         get() = prefs.getBoolean(KEY_ROOT_INSTALL, RootHelper.isRootAvailable())
         set(value) = prefs.edit().putBoolean(KEY_ROOT_INSTALL, value).apply()
@@ -48,6 +52,7 @@ class PreferencesManager(context: Context) {
         private const val KEY_NUMBER_IN_ICON = "pref_number_in_icon"
         private const val KEY_AUTO_HUE = "pref_auto_hue"
         private const val KEY_BADGE_ICONS = "pref_badge_icons"
+        private const val KEY_SHIZUKU_INSTALL = "pref_shizuku_install"
         private const val KEY_ROOT_INSTALL = "pref_root_install"
     }
 }

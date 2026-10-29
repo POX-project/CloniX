@@ -65,7 +65,8 @@ class CloneForgePipeline(
         hueShiftDeg: Float,
         silent: Boolean,
         badgeEnabled: Boolean = true,
-        useRoot: Boolean = false
+        useRoot: Boolean = false,
+        useShizuku: Boolean = false
     ): CloneResult {
         val cloneSuffix = CfConstants.cloneSuffix(cloneIndex)
         val mutatedPackage = "$targetPackage.$cloneSuffix"
@@ -194,33 +195,49 @@ class CloneForgePipeline(
             }
 
             // ------------------------------------------------------------
-            // Phase 6: Atomic multi-APK install session or Root Install (spec 7.3)
+            // Phase 6: Atomic multi-APK install session, Root, or Shizuku (spec 7.3)
             // ------------------------------------------------------------
             progress(PROGRESS_INSTALL, "Installing…")
             val rootSuccess = if (useRoot) {
                 dev.cloneforge.patcher.installer.RootHelper.installApk(savedBaseApk, savedSplits)
             } else false
 
-            val sessionId = if (rootSuccess) {
-                progress(PROGRESS_DONE, "Clone installed silently via root")
-                -100
-            } else {
-                val commit = ClonePackageInstaller(context).installCloneBundle(
-                    mutatedPackageName = mutatedPackage,
-                    signedBaseApk = savedBaseApk,
-                    signedSplitApks = savedSplits,
-                    silent = silent
-                )
-                progress(PROGRESS_DONE, "Clone installation session committed")
-                commit.sessionId
+            val shizukuSuccess = if (!rootSuccess && useShizuku) {
+                dev.cloneforge.patcher.installer.ShizukuInstaller.installApk(savedBaseApk, savedSplits)
+            } else false
+
+            val sessionId = when {
+                rootSuccess -> {
+                    progress(PROGRESS_DONE, "Clone installed silently via root")
+                    -100
+                }
+                shizukuSuccess -> {
+                    progress(PROGRESS_DONE, "Clone installed silently via Shizuku")
+                    -200
+                }
+                else -> {
+                    val commit = ClonePackageInstaller(context).installCloneBundle(
+                        mutatedPackageName = mutatedPackage,
+                        signedBaseApk = savedBaseApk,
+                        signedSplitApks = savedSplits,
+                        silent = silent
+                    )
+                    progress(PROGRESS_DONE, "Clone installation session committed")
+                    commit.sessionId
+                }
+            }
+
+            val installMsg = when {
+                rootSuccess -> "Clone $mutatedPackage installed successfully via root"
+                shizukuSuccess -> "Clone $mutatedPackage installed successfully via Shizuku"
+                else -> "Clone $mutatedPackage ready and installation session committed"
             }
 
             return CloneResult(
                 mutatedPackage = mutatedPackage,
                 sessionId = sessionId,
                 success = true,
-                message = if (rootSuccess) "Clone $mutatedPackage installed successfully via root"
-                          else "Clone $mutatedPackage ready and installation session committed",
+                message = installMsg,
                 apkPath = savedBaseApk.absolutePath
             )
         } catch (t: Throwable) {

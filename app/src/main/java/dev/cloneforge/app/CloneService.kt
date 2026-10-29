@@ -53,6 +53,7 @@ class CloneService : LifecycleService() {
         val addNumberIcon = intent?.getBooleanExtra(EXTRA_ADD_NUMBER_ICON, true) ?: true
         val hueEnabled = intent?.getBooleanExtra(EXTRA_HUE_ENABLED, true) ?: true
         val rootInstall = intent?.getBooleanExtra(EXTRA_ROOT_INSTALL, false) ?: false
+        val shizukuInstall = intent?.getBooleanExtra(EXTRA_SHIZUKU_INSTALL, false) ?: false
         val silent = intent?.getBooleanExtra(EXTRA_SILENT, false) ?: false
 
         lifecycleScope.launch(Dispatchers.IO) {
@@ -65,6 +66,7 @@ class CloneService : LifecycleService() {
                 addNumberIcon = addNumberIcon,
                 hueEnabled = hueEnabled,
                 rootInstall = rootInstall,
+                shizukuInstall = shizukuInstall,
                 silent = silent
             )
         }
@@ -80,6 +82,7 @@ class CloneService : LifecycleService() {
         addNumberIcon: Boolean,
         hueEnabled: Boolean,
         rootInstall: Boolean,
+        shizukuInstall: Boolean,
         silent: Boolean
     ) {
         val history = CloneHistoryStore(this)
@@ -106,6 +109,7 @@ class CloneService : LifecycleService() {
                             addNumberIcon = addNumberIcon,
                             hueEnabled = hueEnabled,
                             rootInstall = rootInstall,
+                            shizukuInstall = shizukuInstall,
                             silent = silent
                         )
                     }.onFailure { t ->
@@ -146,6 +150,7 @@ class CloneService : LifecycleService() {
         addNumberIcon: Boolean,
         hueEnabled: Boolean,
         rootInstall: Boolean,
+        shizukuInstall: Boolean,
         silent: Boolean
     ) {
         val contentLabel = if (addNumberName) "$labelPrefix #$index" else labelPrefix
@@ -191,7 +196,8 @@ class CloneService : LifecycleService() {
             hueShiftDeg = hueShiftDeg,
             silent = silent,
             badgeEnabled = addNumberIcon,
-            useRoot = rootInstall
+            useRoot = rootInstall,
+            useShizuku = shizukuInstall
         )
         withContext(Dispatchers.Main.immediate) {
             CloneBus.post(CloneBus.CloneProgressEvent(
@@ -311,6 +317,7 @@ class CloneService : LifecycleService() {
         const val EXTRA_HUE_ENABLED = "dev.cloneforge.EXTRA_HUE_ENABLED"
         const val EXTRA_BADGE_ENABLED = "dev.cloneforge.EXTRA_BADGE_ENABLED"
         const val EXTRA_ROOT_INSTALL = "dev.cloneforge.EXTRA_ROOT_INSTALL"
+        const val EXTRA_SHIZUKU_INSTALL = "dev.cloneforge.EXTRA_SHIZUKU_INSTALL"
         const val EXTRA_SILENT = "dev.cloneforge.EXTRA_SILENT"
 
         const val NOTIF_PROGRESS_ID = 2001

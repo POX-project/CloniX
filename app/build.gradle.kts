@@ -78,4 +78,6 @@ dependencies {
     implementation(libs.lifecycle.runtime)
     implementation(libs.lifecycle.service)
     implementation(libs.coroutines.android)
+    implementation(libs.shizuku.api)
+    implementation(libs.shizuku.provider)
 }

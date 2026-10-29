@@ -39,6 +39,8 @@ import com.google.android.material.materialswitch.MaterialSwitch
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.textfield.TextInputEditText
 import dev.cloneforge.patcher.installer.RootHelper
+import dev.cloneforge.patcher.installer.ShizukuInstaller
+import rikka.shizuku.Shizuku
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -51,6 +53,7 @@ import java.io.File
  *  - Unlimited cloning with quick chips and number steppers
  *  - Per-instance launcher icon hue shifting and badge overlay
  *  - Silent root installation option using Magisk su
+ *  - Silent Shizuku / ADB shell installation option (no root required)
  *  - Comprehensive app preferences and cache cleaning
  */
 class MainActivity : AppCompatActivity() {
@@ -64,6 +67,7 @@ class MainActivity : AppCompatActivity() {
         val addNumberIcon: Boolean,
         val hueEnabled: Boolean,
         val rootInstall: Boolean,
+        val shizukuInstall: Boolean,
         val silent: Boolean
     )
 
@@ -113,11 +117,28 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvThemeSummary: TextView
     private lateinit var switchPrefHue: MaterialSwitch
     private lateinit var switchPrefBadge: MaterialSwitch
+    private lateinit var switchPrefShizuku: MaterialSwitch
+    private lateinit var rowShizukuStatus: View
+    private lateinit var ivShizukuStatusIcon: ImageView
+    private lateinit var tvShizukuStatus: TextView
     private lateinit var switchPrefRoot: MaterialSwitch
     private lateinit var ivRootStatusIcon: ImageView
     private lateinit var tvRootStatus: TextView
     private lateinit var rowClearCache: View
     private lateinit var tvCacheSummary: TextView
+
+    private val shizukuPermissionListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
+        if (requestCode == 1001) {
+            runOnUiThread {
+                updateSettingsUi()
+                if (grantResult == PackageManager.PERMISSION_GRANTED) {
+                    Toast.makeText(this, "Shizuku authorization granted", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this, "Shizuku authorization denied", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
 
     private var allApps: List<AppItem> = emptyList()
     private var pendingRequest: PendingCloneRequest? = null
@@ -129,6 +150,14 @@ class MainActivity : AppCompatActivity() {
                 startCloneService(request)
             }
         }
+
+    private val shizukuBinderReceivedListener = Shizuku.OnBinderReceivedListener {
+        runOnUiThread { updateSettingsUi() }
+    }
+
+    private val shizukuBinderDeadListener = Shizuku.OnBinderDeadListener {
+        runOnUiThread { updateSettingsUi() }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -144,6 +173,16 @@ class MainActivity : AppCompatActivity() {
 
         loadInstalledApps()
         collectCloneBus()
+        Shizuku.addBinderReceivedListenerSticky(shizukuBinderReceivedListener)
+        Shizuku.addBinderDeadListener(shizukuBinderDeadListener)
+        Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        Shizuku.removeBinderReceivedListener(shizukuBinderReceivedListener)
+        Shizuku.removeBinderDeadListener(shizukuBinderDeadListener)
+        Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener)
     }
 
     private fun setupBackPressHandler() {
@@ -204,6 +243,10 @@ class MainActivity : AppCompatActivity() {
         tvThemeSummary = tabSettingsView.findViewById(R.id.tv_theme_summary)
         switchPrefHue = tabSettingsView.findViewById(R.id.switch_pref_hue)
         switchPrefBadge = tabSettingsView.findViewById(R.id.switch_pref_badge)
+        switchPrefShizuku = tabSettingsView.findViewById(R.id.switch_pref_shizuku)
+        rowShizukuStatus = tabSettingsView.findViewById(R.id.row_shizuku_status)
+        ivShizukuStatusIcon = tabSettingsView.findViewById(R.id.iv_shizuku_status_icon)
+        tvShizukuStatus = tabSettingsView.findViewById(R.id.tv_shizuku_status)
         switchPrefRoot = tabSettingsView.findViewById(R.id.switch_pref_root)
         ivRootStatusIcon = tabSettingsView.findViewById(R.id.iv_root_status_icon)
         tvRootStatus = tabSettingsView.findViewById(R.id.tv_root_status)
@@ -403,7 +446,10 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        if (prefs.isRootInstallEnabled && RootHelper.isRootAvailable()) {
+        val hasRoot = RootHelper.isRootAvailable()
+        val hasShizuku = ShizukuInstaller.isShizukuPermissionGranted()
+
+        if (prefs.isRootInstallEnabled && hasRoot) {
             Toast.makeText(this, "Silently installing ${installable.size} clones via root…", Toast.LENGTH_SHORT).show()
             lifecycleScope.launch(Dispatchers.IO) {
                 var successCount = 0
@@ -415,6 +461,20 @@ class MainActivity : AppCompatActivity() {
                     exitClonesSelectionMode()
                     renderClones()
                     Toast.makeText(this@MainActivity, "Installed $successCount of ${installable.size} clones", Toast.LENGTH_SHORT).show()
+                }
+            }
+        } else if (prefs.isShizukuInstallEnabled && hasShizuku) {
+            Toast.makeText(this, "Silently installing ${installable.size} clones via Shizuku…", Toast.LENGTH_SHORT).show()
+            lifecycleScope.launch(Dispatchers.IO) {
+                var successCount = 0
+                for (item in installable) {
+                    val ok = ShizukuInstaller.installApk(File(item.entry.apkPath))
+                    if (ok) successCount++
+                }
+                withContext(Dispatchers.Main) {
+                    exitClonesSelectionMode()
+                    renderClones()
+                    Toast.makeText(this@MainActivity, "Installed $successCount of ${installable.size} clones via Shizuku", Toast.LENGTH_SHORT).show()
                 }
             }
         } else {
@@ -438,7 +498,9 @@ class MainActivity : AppCompatActivity() {
             .setMessage(getString(R.string.confirm_batch_uninstall_msg, installed.size))
             .setNegativeButton(android.R.string.cancel, null)
             .setPositiveButton(R.string.button_uninstall) { _, _ ->
-                if (prefs.isRootInstallEnabled && RootHelper.isRootAvailable()) {
+                val hasRoot = RootHelper.isRootAvailable()
+                val hasShizuku = ShizukuInstaller.isShizukuPermissionGranted()
+                if (prefs.isRootInstallEnabled && hasRoot) {
                     Toast.makeText(this, "Silently uninstalling ${installed.size} clones via root…", Toast.LENGTH_SHORT).show()
                     lifecycleScope.launch(Dispatchers.IO) {
                         var successCount = 0
@@ -453,6 +515,23 @@ class MainActivity : AppCompatActivity() {
                             exitClonesSelectionMode()
                             renderClones()
                             Toast.makeText(this@MainActivity, "Uninstalled $successCount of ${installed.size} clones", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                } else if (prefs.isShizukuInstallEnabled && hasShizuku) {
+                    Toast.makeText(this, "Silently uninstalling ${installed.size} clones via Shizuku…", Toast.LENGTH_SHORT).show()
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        var successCount = 0
+                        for (item in installed) {
+                            val ok = ShizukuInstaller.uninstallPackage(item.entry.clonePackage)
+                            if (ok) {
+                                history.removeClone(item.entry.clonePackage)
+                                successCount++
+                            }
+                        }
+                        withContext(Dispatchers.Main) {
+                            exitClonesSelectionMode()
+                            renderClones()
+                            Toast.makeText(this@MainActivity, "Uninstalled $successCount of ${installed.size} clones via Shizuku", Toast.LENGTH_SHORT).show()
                         }
                     }
                 } else {
@@ -502,6 +581,16 @@ class MainActivity : AppCompatActivity() {
         switchPrefBadge.setOnCheckedChangeListener { _, isChecked ->
             prefs.isBadgeIconsEnabled = isChecked
         }
+        switchPrefShizuku.setOnCheckedChangeListener { _, isChecked ->
+            prefs.isShizukuInstallEnabled = isChecked
+        }
+        rowShizukuStatus.setOnClickListener {
+            if (ShizukuInstaller.isShizukuAvailable() && !ShizukuInstaller.isShizukuPermissionGranted()) {
+                ShizukuInstaller.requestPermission(1001)
+            } else if (!ShizukuInstaller.isShizukuAvailable()) {
+                Toast.makeText(this, R.string.shizuku_status_not_running, Toast.LENGTH_SHORT).show()
+            }
+        }
         switchPrefRoot.setOnCheckedChangeListener { _, isChecked ->
             prefs.isRootInstallEnabled = isChecked
         }
@@ -518,6 +607,33 @@ class MainActivity : AppCompatActivity() {
 
         switchPrefHue.isChecked = prefs.isAutoHueEnabled
         switchPrefBadge.isChecked = prefs.isBadgeIconsEnabled
+
+        val hasShizukuRunning = ShizukuInstaller.isShizukuAvailable()
+        val hasShizukuGranted = ShizukuInstaller.isShizukuPermissionGranted()
+        when {
+            hasShizukuGranted -> {
+                tvShizukuStatus.text = getString(R.string.shizuku_status_authorized)
+                tvShizukuStatus.setTextColor(Color.parseColor("#4CAF50"))
+                ivShizukuStatusIcon.imageTintList = ColorStateList.valueOf(Color.parseColor("#4CAF50"))
+                switchPrefShizuku.isEnabled = true
+                switchPrefShizuku.isChecked = prefs.isShizukuInstallEnabled
+            }
+            hasShizukuRunning -> {
+                tvShizukuStatus.text = getString(R.string.shizuku_status_permission_needed)
+                tvShizukuStatus.setTextColor(Color.parseColor("#FF9800"))
+                ivShizukuStatusIcon.imageTintList = ColorStateList.valueOf(Color.parseColor("#FF9800"))
+                switchPrefShizuku.isEnabled = false
+                switchPrefShizuku.isChecked = false
+            }
+            else -> {
+                tvShizukuStatus.text = getString(R.string.shizuku_status_not_running)
+                tvShizukuStatus.setTextColor(Color.GRAY)
+                ivShizukuStatusIcon.imageTintList = ColorStateList.valueOf(Color.GRAY)
+                switchPrefShizuku.isEnabled = false
+                switchPrefShizuku.isChecked = false
+            }
+        }
+
         switchPrefRoot.isChecked = prefs.isRootInstallEnabled
 
         val hasRoot = RootHelper.isRootAvailable()
@@ -614,8 +730,9 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         renderClones()
+        updateSettingsUi()
         val request = pendingRequest
-        if (request != null && (request.rootInstall || packageManager.canRequestPackageInstalls())) {
+        if (request != null && (request.rootInstall || request.shizukuInstall || packageManager.canRequestPackageInstalls())) {
             pendingRequest = null
             requestNotificationThenStart(request)
         } else if (request != null && !packageManager.canRequestPackageInstalls()) {
@@ -713,7 +830,10 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        if (prefs.isRootInstallEnabled && RootHelper.isRootAvailable()) {
+        val hasRoot = RootHelper.isRootAvailable()
+        val hasShizuku = ShizukuInstaller.isShizukuPermissionGranted()
+
+        if (prefs.isRootInstallEnabled && hasRoot) {
             Toast.makeText(this, "Installing ${entry.cloneLabel} silently via root…", Toast.LENGTH_SHORT).show()
             lifecycleScope.launch(Dispatchers.IO) {
                 val ok = RootHelper.installApk(apkFile)
@@ -723,6 +843,19 @@ class MainActivity : AppCompatActivity() {
                         renderClones()
                     } else {
                         Toast.makeText(this@MainActivity, "Root installation failed", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        } else if (prefs.isShizukuInstallEnabled && hasShizuku) {
+            Toast.makeText(this, "Installing ${entry.cloneLabel} silently via Shizuku…", Toast.LENGTH_SHORT).show()
+            lifecycleScope.launch(Dispatchers.IO) {
+                val ok = ShizukuInstaller.installApk(apkFile)
+                withContext(Dispatchers.Main) {
+                    if (ok) {
+                        Toast.makeText(this@MainActivity, "Installed ${entry.cloneLabel} successfully via Shizuku!", Toast.LENGTH_SHORT).show()
+                        renderClones()
+                    } else {
+                        Toast.makeText(this@MainActivity, "Shizuku installation failed", Toast.LENGTH_LONG).show()
                     }
                 }
             }
@@ -769,7 +902,9 @@ class MainActivity : AppCompatActivity() {
             .setMessage(getString(R.string.uninstall_message_arg, entry.cloneLabel))
             .setNegativeButton(android.R.string.cancel, null)
             .setPositiveButton(R.string.uninstall) { _, _ ->
-                if (prefs.isRootInstallEnabled && RootHelper.isRootAvailable()) {
+                val hasRoot = RootHelper.isRootAvailable()
+                val hasShizuku = ShizukuInstaller.isShizukuPermissionGranted()
+                if (prefs.isRootInstallEnabled && hasRoot) {
                     lifecycleScope.launch(Dispatchers.IO) {
                         val uninstalled = RootHelper.uninstallPackage(entry.clonePackage)
                         withContext(Dispatchers.Main) {
@@ -777,6 +912,19 @@ class MainActivity : AppCompatActivity() {
                                 history.removeClone(entry.clonePackage)
                                 renderClones()
                                 Toast.makeText(this@MainActivity, "Uninstalled ${entry.cloneLabel}", Toast.LENGTH_SHORT).show()
+                            } else {
+                                startSystemUninstaller(entry.clonePackage)
+                            }
+                        }
+                    }
+                } else if (prefs.isShizukuInstallEnabled && hasShizuku) {
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        val uninstalled = ShizukuInstaller.uninstallPackage(entry.clonePackage)
+                        withContext(Dispatchers.Main) {
+                            if (uninstalled) {
+                                history.removeClone(entry.clonePackage)
+                                renderClones()
+                                Toast.makeText(this@MainActivity, "Uninstalled ${entry.cloneLabel} via Shizuku", Toast.LENGTH_SHORT).show()
                             } else {
                                 startSystemUninstaller(entry.clonePackage)
                             }
@@ -824,8 +972,28 @@ class MainActivity : AppCompatActivity() {
         hueSwitch.isChecked = prefs.isAutoHueEnabled
 
         val hasRoot = RootHelper.isRootAvailable()
-        rootSwitch.isEnabled = hasRoot
-        rootSwitch.isChecked = hasRoot && prefs.isRootInstallEnabled
+        val hasShizuku = ShizukuInstaller.isShizukuPermissionGranted()
+        val hasSilent = (hasRoot && prefs.isRootInstallEnabled) || (hasShizuku && prefs.isShizukuInstallEnabled)
+        val canSilent = hasRoot || hasShizuku
+
+        val tvRootLabel = sheet.findViewById<TextView>(R.id.tv_root_label)
+        val tvRootHelper = sheet.findViewById<TextView>(R.id.tv_root_helper)
+        if (hasShizuku && !hasRoot) {
+            tvRootLabel?.text = getString(R.string.pref_shizuku_install_setting)
+            tvRootHelper?.text = getString(R.string.pref_shizuku_install_desc)
+        } else if (hasRoot && hasShizuku) {
+            tvRootLabel?.text = "Silent Install (Root / Shizuku)"
+            tvRootHelper?.text = "Direct silent background installation without popups"
+        } else if (hasRoot) {
+            tvRootLabel?.text = getString(R.string.label_root_install)
+            tvRootHelper?.text = getString(R.string.label_root_install_hint)
+        } else {
+            tvRootLabel?.text = "Silent Install (Unavailable)"
+            tvRootHelper?.text = "Requires Root access or authorized Shizuku service"
+        }
+
+        rootSwitch.isEnabled = canSilent
+        rootSwitch.isChecked = hasSilent
 
         fun getCount(): Int = editCount.text?.toString()?.toIntOrNull()?.coerceAtLeast(1) ?: 1
 
@@ -878,6 +1046,10 @@ class MainActivity : AppCompatActivity() {
             val cloneCount = getCount()
             dialog.dismiss()
 
+            val useRoot = rootSwitch.isChecked && hasRoot && prefs.isRootInstallEnabled
+            val useShizuku = rootSwitch.isChecked && !useRoot && hasShizuku && prefs.isShizukuInstallEnabled
+            val isSilent = useRoot || useShizuku
+
             val request = PendingCloneRequest(
                 app = app,
                 targetPackages = listOf(app.packageName),
@@ -886,8 +1058,9 @@ class MainActivity : AppCompatActivity() {
                 addNumberName = switchNameNumber.isChecked,
                 addNumberIcon = switchIconNumber.isChecked,
                 hueEnabled = hueSwitch.isChecked,
-                rootInstall = rootSwitch.isChecked,
-                silent = rootSwitch.isChecked
+                rootInstall = useRoot,
+                shizukuInstall = useShizuku,
+                silent = isSilent
             )
             ensureInstallPermissionThenStart(request)
         }
@@ -924,8 +1097,28 @@ class MainActivity : AppCompatActivity() {
         hueSwitch.isChecked = prefs.isAutoHueEnabled
 
         val hasRoot = RootHelper.isRootAvailable()
-        rootSwitch.isEnabled = hasRoot
-        rootSwitch.isChecked = hasRoot && prefs.isRootInstallEnabled
+        val hasShizuku = ShizukuInstaller.isShizukuPermissionGranted()
+        val hasSilent = (hasRoot && prefs.isRootInstallEnabled) || (hasShizuku && prefs.isShizukuInstallEnabled)
+        val canSilent = hasRoot || hasShizuku
+
+        val tvRootLabel = sheet.findViewById<TextView>(R.id.tv_root_label)
+        val tvRootHelper = sheet.findViewById<TextView>(R.id.tv_root_helper)
+        if (hasShizuku && !hasRoot) {
+            tvRootLabel?.text = getString(R.string.pref_shizuku_install_setting)
+            tvRootHelper?.text = getString(R.string.pref_shizuku_install_desc)
+        } else if (hasRoot && hasShizuku) {
+            tvRootLabel?.text = "Silent Install (Root / Shizuku)"
+            tvRootHelper?.text = "Direct silent background installation without popups"
+        } else if (hasRoot) {
+            tvRootLabel?.text = getString(R.string.label_root_install)
+            tvRootHelper?.text = getString(R.string.label_root_install_hint)
+        } else {
+            tvRootLabel?.text = "Silent Install (Unavailable)"
+            tvRootHelper?.text = "Requires Root access or authorized Shizuku service"
+        }
+
+        rootSwitch.isEnabled = canSilent
+        rootSwitch.isChecked = hasSilent
 
         fun getCount(): Int = editCount.text?.toString()?.toIntOrNull()?.coerceAtLeast(1) ?: 1
 
@@ -983,6 +1176,10 @@ class MainActivity : AppCompatActivity() {
             val cloneCountPerApp = getCount()
             dialog.dismiss()
 
+            val useRoot = rootSwitch.isChecked && hasRoot && prefs.isRootInstallEnabled
+            val useShizuku = rootSwitch.isChecked && !useRoot && hasShizuku && prefs.isShizukuInstallEnabled
+            val isSilent = useRoot || useShizuku
+
             val request = PendingCloneRequest(
                 app = null,
                 targetPackages = selectedApps.map { it.packageName },
@@ -991,8 +1188,9 @@ class MainActivity : AppCompatActivity() {
                 addNumberName = switchNameNumber.isChecked,
                 addNumberIcon = switchIconNumber.isChecked,
                 hueEnabled = hueSwitch.isChecked,
-                rootInstall = rootSwitch.isChecked,
-                silent = rootSwitch.isChecked
+                rootInstall = useRoot,
+                shizukuInstall = useShizuku,
+                silent = isSilent
             )
             exitAppsSelectionMode()
             bottomNav.selectedItemId = R.id.nav_clones
@@ -1003,7 +1201,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun ensureInstallPermissionThenStart(request: PendingCloneRequest) {
-        if (request.rootInstall && RootHelper.isRootAvailable()) {
+        if ((request.rootInstall && RootHelper.isRootAvailable()) ||
+            (request.shizukuInstall && ShizukuInstaller.isShizukuPermissionGranted())
+        ) {
             requestNotificationThenStart(request)
             return
         }
@@ -1059,6 +1259,7 @@ class MainActivity : AppCompatActivity() {
             putExtra(CloneService.EXTRA_ADD_NUMBER_ICON, request.addNumberIcon)
             putExtra(CloneService.EXTRA_HUE_ENABLED, request.hueEnabled)
             putExtra(CloneService.EXTRA_ROOT_INSTALL, request.rootInstall)
+            putExtra(CloneService.EXTRA_SHIZUKU_INSTALL, request.shizukuInstall)
             putExtra(CloneService.EXTRA_SILENT, request.silent)
         }
         ContextCompat.startForegroundService(this, intent)

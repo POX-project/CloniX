@@ -13,6 +13,7 @@ bouncycastle = "1.78.1"
 lsplant = "6.4"
 shadowhook = "2.0.1"
 coroutines = "1.8.1"
+shizuku = "13.1.5"
 
 [libraries]
 androidx-core = { group = "androidx.core", name = "core", version.ref = "coreKtx" }
@@ -29,6 +30,8 @@ lsplant = { group = "org.lsposed.lsplant", name = "lsplant", version.ref = "lspl
 shadowhook = { group = "com.bytedance.android", name = "shadowhook", version.ref = "shadowhook" }
 coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 androidx-annotation = { group = "androidx.annotation", name = "annotation", version = "1.9.1" }
+shizuku-api = { group = "dev.rikka.shizuku", name = "api", version.ref = "shizuku" }
+shizuku-provider = { group = "dev.rikka.shizuku", name = "provider", version.ref = "shizuku" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

@@ -28,4 +28,5 @@ dependencies {
     implementation(libs.bouncycastle)
     implementation(libs.coroutines.android)
     implementation(libs.androidx.annotation)
+    implementation(libs.shizuku.api)
 }
