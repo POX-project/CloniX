@@ -27,20 +27,26 @@ object IconPatcher {
     private const val TAG = "CloneForgeIcon"
 
     private val ICON_NAME_HINT = Regex(
-        ".*/(mipmap|drawable)[^/]*/.*(ic_launcher|launcher_icon|app_icon|ic_app|app_logo|ic_logo).*\\.png$",
+        ".*/(mipmap|drawable)[^/]*/.*(ic_launcher|launcher|app_icon|ic_app|app_logo|ic_logo|foreground).*\\.png$",
         RegexOption.IGNORE_CASE
     )
 
     /**
-     * Applies a hue rotation (in degrees) to launcher icon PNG entries of [apkFile]
+     * Applies a hue rotation (in degrees) and optional clone badge to launcher icon PNG entries of [apkFile]
      * in place. Never throws; failures are logged and leave the APK untouched.
      *
      * @param entries explicit entry names to recolor; when empty, the patcher
      *                discovers PNG entries under mipmap and drawable icon names.
+     * @param badgeText optional clone number/label badge overlay (e.g. "#1", "#2").
      */
-    fun applyIconHueShift(apkFile: File, entries: List<String>, hueDeg: Float) {
+    fun applyIconHueShift(
+        apkFile: File,
+        entries: List<String> = emptyList(),
+        hueDeg: Float = 0f,
+        badgeText: String? = null
+    ) {
         runCatching {
-            if (hueDeg == 0f || !apkFile.isFile) return
+            if ((hueDeg == 0f && badgeText.isNullOrBlank()) || !apkFile.isFile) return
             val allEntries: List<RawZipEntry> = ApkZipMapper.listEntries(apkFile)
             val wanted: Set<String> = if (entries.isNotEmpty()) {
                 entries.toSet().intersect(allEntries.map { it.name }.toSet())
@@ -49,7 +55,7 @@ object IconPatcher {
             }
             if (wanted.isEmpty()) return
 
-            val matrix = hueRotationMatrix(hueDeg)
+            val matrix = if (hueDeg != 0f) hueRotationMatrix(hueDeg) else null
             val replaced = HashMap<String, ByteArray>()
 
             for (entry in allEntries) {
@@ -58,7 +64,7 @@ object IconPatcher {
                 if (!name.endsWith(".png") || name.endsWith(".9.png")) continue
                 val bytes = readEntryBytes(apkFile, entry)
                     ?: continue
-                val shifted = recolorPng(bytes, matrix) ?: continue
+                val shifted = recolorPng(bytes, matrix, badgeText) ?: continue
                 replaced[name] = shifted
             }
             if (replaced.isEmpty()) return
@@ -104,28 +110,67 @@ object IconPatcher {
 
     private fun readEntryBytes(apkFile: File, entry: RawZipEntry): ByteArray? {
         return runCatching {
-            java.io.RandomAccessFile(apkFile, "r").use { raf ->
-                val bytes = ByteArray(entry.compressedSize.toInt())
-                raf.seek(entry.dataOffset)
-                raf.readFully(bytes)
-                bytes
+            java.util.zip.ZipFile(apkFile).use { zip ->
+                val ze = zip.getEntry(entry.name) ?: return null
+                zip.getInputStream(ze).use { it.readBytes() }
             }
         }.getOrNull()
     }
 
     /**
-     * Decodes the PNG, applies the hue rotation in ARGB_8888 space and
-     * re-encodes as PNG. Returns null when decoding fails.
+     * Decodes the PNG, applies the hue rotation in ARGB_8888 space, adds a badge if requested,
+     * and re-encodes as PNG. Returns null when decoding fails.
      */
-    private fun recolorPng(pngBytes: ByteArray, matrix: ColorMatrix): ByteArray? {
+    private fun recolorPng(pngBytes: ByteArray, matrix: ColorMatrix?, badgeText: String?): ByteArray? {
         return runCatching {
             val source = BitmapFactory.decodeByteArray(pngBytes, 0, pngBytes.size) ?: return null
             try {
                 val output = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
                 val canvas = Canvas(output)
                 val paint = Paint(Paint.FILTER_BITMAP_FLAG)
-                paint.colorFilter = ColorMatrixColorFilter(matrix)
+                if (matrix != null) {
+                    paint.colorFilter = ColorMatrixColorFilter(matrix)
+                }
                 canvas.drawBitmap(source, 0f, 0f, paint)
+
+                if (!badgeText.isNullOrBlank() && source.width >= 48) {
+                    val w = source.width.toFloat()
+                    val h = source.height.toFloat()
+                    val badgeH = h * 0.30f
+                    val pad = w * 0.03f
+
+                    val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = 0xF018181A.toInt()
+                        style = Paint.Style.FILL
+                    }
+                    val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = 0xFF7C4DFF.toInt()
+                        style = Paint.Style.STROKE
+                        strokeWidth = maxOf(2f, w * 0.025f)
+                    }
+                    val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = 0xFFFFFFFF.toInt()
+                        this.textSize = badgeH * 0.68f
+                        typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+                        textAlign = Paint.Align.CENTER
+                    }
+
+                    val textWidth = textPaint.measureText(badgeText)
+                    val badgeW = maxOf(w * 0.38f, textWidth + (pad * 3f))
+
+                    val badgeRect = android.graphics.RectF(
+                        w - badgeW - pad,
+                        h - badgeH - pad,
+                        w - pad,
+                        h - pad
+                    )
+                    val r = badgeH / 2f
+                    canvas.drawRoundRect(badgeRect, r, r, badgePaint)
+                    canvas.drawRoundRect(badgeRect, r, r, borderPaint)
+
+                    val textY = badgeRect.centerY() - ((textPaint.descent() + textPaint.ascent()) / 2f)
+                    canvas.drawText(badgeText, badgeRect.centerX(), textY, textPaint)
+                }
 
                 val encoded = java.io.ByteArrayOutputStream()
                 output.compress(Bitmap.CompressFormat.PNG, 100, encoded)

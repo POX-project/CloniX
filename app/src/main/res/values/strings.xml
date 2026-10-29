@@ -3,30 +3,75 @@
 
     <!-- Main screen -->
     <string name="app_title">CloniX</string>
-    <string name="app_subtitle">Install true multi-instance copies of your apps — every clone gets its own package, its own data and its own icon.</string>
+    <string name="app_subtitle">True multi-instance app cloning with distinct launcher icons and independent data storage.</string>
     <string name="hint_search">Search installed apps</string>
     <string name="title_installed_apps">Installed apps</string>
     <string name="switch_include_system">System</string>
     <string name="empty_app_list">No matching apps found.</string>
     <string name="loading_apps">Loading apps…</string>
 
+    <!-- Navigation -->
+    <string name="nav_apps">Apps</string>
+    <string name="nav_clones">Clones</string>
+    <string name="nav_settings">Settings</string>
+
     <!-- Clone bottom sheet -->
     <string name="sheet_title_arg">Clone: %1$s</string>
-    <string name="sheet_hint_pattern">Final labels look like “Label #1”, “Label #2” …</string>
+    <string name="sheet_hint_pattern">Choose clone name, icon appearance, and instance number options</string>
     <string name="hint_label_prefix">Label prefix</string>
     <string name="label_clone_count">Number of clones</string>
-    <string name="label_hue_shift">Hue-shifted icons</string>
-    <string name="label_hue_shift_hint">Icons tinted 120° apart per clone</string>
-    <string name="button_start_clones">Start clones</string>
+    <string name="label_number_in_name">Add number to App Name</string>
+    <string name="label_number_in_name_hint">App name will be “Label #1”, “Label #2”</string>
+    <string name="label_number_in_icon">Add number to Icon Badge</string>
+    <string name="label_number_in_icon_hint">Draw #1, #2 badge pill on home screen icon</string>
+    <string name="label_hue_shift">Hue-shift icon colors</string>
+    <string name="label_hue_shift_hint">Tint each clone icon with a distinct color</string>
+    <string name="label_root_install">Silent Root Install</string>
+    <string name="label_root_install_hint">Install silently via su without confirmation popups</string>
+    <string name="button_start_clones">Start Cloning</string>
+    <string name="button_install_apk">Install APK</string>
 
-    <!-- Clone history -->
+    <!-- Clones Tab -->
     <string name="title_your_clones">Your clones</string>
-    <string name="no_clones_yet">No clones yet — pick an app above to forge the first one.</string>
-    <string name="button_open">Open</string>
+    <string name="no_clones_yet">No clones yet — pick an app to forge the first one.</string>
+    <string name="clones_empty_title">No Clones Created Yet</string>
+    <string name="clones_empty_subtitle">Pick any installed app from the Apps tab to forge an independent clone with its own icon and storage.</string>
+    <string name="btn_go_to_apps">Browse Apps</string>
+    <string name="button_open">Launch</string>
     <string name="button_uninstall">Uninstall</string>
     <string name="uninstall_title">Uninstall clone</string>
     <string name="uninstall_message_arg">Remove %1$s from this device?</string>
     <string name="uninstall">Uninstall</string>
+
+    <!-- Settings Tab -->
+    <string name="title_settings">Settings</string>
+    <string name="pref_category_appearance">Appearance &amp; Theme</string>
+    <string name="pref_theme">Theme Mode</string>
+    <string name="pref_theme_summary">Follow system default, light, or dark mode</string>
+    <string name="theme_system">Follow System</string>
+    <string name="theme_light">Light Theme</string>
+    <string name="theme_dark">Dark Theme</string>
+
+    <string name="pref_category_cloning">Cloning &amp; Icons</string>
+    <string name="pref_auto_hue">Auto-Hue Shift</string>
+    <string name="pref_auto_hue_desc">Rotate icon colors for each clone instance</string>
+    <string name="pref_badge_icons_setting">Clone Number Badging</string>
+    <string name="pref_badge_icons_desc">Overlay #1, #2 badge on launcher home screen icons</string>
+
+    <string name="pref_category_install">Installation Engine</string>
+    <string name="pref_root_install_setting">Silent Root Install</string>
+    <string name="pref_root_install_desc">Direct silent background installation using Magisk root access</string>
+    <string name="root_status_granted">Root access active (Magisk su)</string>
+    <string name="root_status_not_granted">Standard PackageInstaller (Non-root)</string>
+
+    <string name="pref_category_storage">Storage &amp; Cache</string>
+    <string name="pref_clear_cache">Clean Cache &amp; Staging</string>
+    <string name="pref_clear_cache_desc">Delete temporary APK builds and cached data</string>
+    <string name="toast_cache_cleared">Cleared %1$s of temporary staging files</string>
+
+    <string name="pref_category_about">About CloniX</string>
+    <string name="about_version">CloniX v1.0.0 Pro</string>
+    <string name="about_desc">Advanced Android application cloner with unlimited instances, component remapping, launcher icon badge customization, and sandbox runtime isolation.</string>
 
     <!-- Permissions and dialogs -->
     <string name="install_permission_rationale">CloniX needs the “install unknown apps” permission before it can install a cloned APK.</string>
@@ -52,10 +97,26 @@
     <string name="notif_confirm_title">Confirmation needed: %1$s</string>
     <string name="notif_confirm_text">Tap to approve the install from Android (or use the dialog just opened).</string>
     <string name="notif_install_success_title">Clone installed: %1$s</string>
-    <string name="notif_install_success_text">The clone has been installed successfully. Launch it from the launcher or the “Your clones” list.</string>
+    <string name="notif_install_success_text">The clone has been installed successfully. Launch it from the launcher or the Clones list.</string>
     <string name="notif_install_failed_title">Clone install failed: %1$s</string>
     <string name="notif_install_failed_generic">CloniX could not complete the install.</string>
 
     <!-- Clone steps surfaced in the notification/bus -->
     <string name="clone_step_starting">Starting…</string>
+
+    <!-- Batch selection and actions -->
+    <string name="action_select">Select</string>
+    <string name="action_select_all">Select All</string>
+    <string name="action_deselect_all">Deselect All</string>
+    <string name="action_close_selection">Close</string>
+    <string name="selected_count_format">%1$d selected</string>
+    <string name="btn_batch_clone">Batch Clone (%1$d)</string>
+    <string name="btn_batch_uninstall">Uninstall (%1$d)</string>
+    <string name="btn_batch_install">Install (%1$d)</string>
+    <string name="btn_batch_remove">Remove (%1$d)</string>
+    <string name="sheet_batch_clone_title">Batch Clone %1$d Apps</string>
+    <string name="confirm_batch_uninstall_title">Batch Uninstall Clones</string>
+    <string name="confirm_batch_uninstall_msg">Uninstall %1$d selected clones from your device?</string>
+    <string name="confirm_batch_remove_title">Remove Selected Clones</string>
+    <string name="confirm_batch_remove_msg">Remove %1$d selected clones from your list and delete any cached APK files?</string>
 </resources>

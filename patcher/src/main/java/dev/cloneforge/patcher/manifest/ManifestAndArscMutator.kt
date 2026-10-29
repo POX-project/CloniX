@@ -1,7 +1,6 @@
 package dev.cloneforge.patcher.manifest
 
 import com.reandroid.apk.ApkModule
-import com.reandroid.arsc.chunk.TableBlock
 import com.reandroid.arsc.chunk.xml.AndroidManifestBlock
 import com.reandroid.arsc.chunk.xml.ResXmlAttribute
 import com.reandroid.arsc.chunk.xml.ResXmlElement
@@ -138,16 +137,9 @@ class ManifestAndArscMutator {
         val appElement = CollectionUtil.toList(rootManifest.getElements(TAG_APPLICATION))
             .firstOrNull() ?: throw IOException("Missing <application> element in $baseApkFile")
 
-        // extractNativeLibs=false keeps the injected .so entries uncompressed so
-        // the 16 KB data alignment of spec 7.1 remains valid after install.
-        runCatching {
-            val attr = appElement.searchAttributeByResourceId(ATTR_EXTRACT_NATIVE_LIBS) ?: return@runCatching
-            if (attr.getValueType() == ValueType.BOOLEAN) {
-                attr.setValueAsBoolean(false)
-            } else {
-                attr.setValueAsString("false")
-            }
-        }
+        // Do NOT force extractNativeLibs to false. If an app contains compressed .so files
+        // (e.g. Telegram, Forkgram), forcing extractNativeLibs=false causes Android PackageInstaller
+        // to fail with INSTALL_FAILED_INVALID_APK: Failed to extract native libraries, res=-2.
 
         // Capture & replace application@android:name.
         val appNameAttr = appElement.searchAttributeByResourceId(ATTR_NAME)
@@ -216,8 +208,8 @@ class ManifestAndArscMutator {
             injectMetaData(appElement, CfConstants.META_ORIG_FACTORY, expandedOrigFactory)
         }
 
-        // 8. Patch the app label string across locales in resources.arsc.
-        patchApplicationLabel(apkModule, appElement, customAppLabel)
+        // 8. Patch the app label and launcher activity labels.
+        patchApplicationAndLauncherLabels(appElement, customAppLabel)
 
         writeApkSafe(apkModule, baseApkFile)
 
@@ -360,36 +352,44 @@ class ManifestAndArscMutator {
     }
 
     /**
-     * Patches the app label string in every locale configuration of the
-     * referenced resources.arsc entry. Falls back to an inline android:label.
+     * Patches the app label directly on the <application> element and on any
+     * launcher activities or activity-aliases in the AndroidManifest.xml.
+     * This avoids parsing the multi-megabyte resources.arsc table into memory,
+     * which prevents OutOfMemory / SIGABRT crashes on large apps (like Brave).
      */
-    private fun patchApplicationLabel(apkModule: ApkModule, appElement: ResXmlElement, customLabel: String) {
-        val labelAttr: ResXmlAttribute = appElement.getOrCreateAndroidAttribute("label", ATTR_LABEL)
-        var patched = false
-        if (labelAttr.getValueType() == ValueType.REFERENCE) {
-            val resId = labelAttr.getData()
-            if (resId != 0) {
-                patched = runCatching {
-                    val tableBlock: TableBlock = apkModule.getTableBlock() ?: return@runCatching false
-                    val entry = tableBlock.getResource(resId) ?: return@runCatching false
-                    if (!entry.isDefined()) return@runCatching false
-                    var any = false
-                    val iterator = entry.iterator()
-                    while (iterator.hasNext()) {
-                        val resValue = iterator.next().getResValue()
-                        if (resValue != null && resValue.getValueType() == ValueType.STRING) {
-                            resValue.setValueAsString(customLabel)
-                            any = true
-                        }
-                    }
-                    any
-                }.getOrDefault(false)
+    private fun patchApplicationAndLauncherLabels(appElement: ResXmlElement, customLabel: String) {
+        val appLabelAttr = appElement.getOrCreateAndroidAttribute("label", ATTR_LABEL)
+        appLabelAttr.setValueAsString(customLabel)
+
+        for (comp in collectComponents(appElement)) {
+            if (isLauncherComponent(comp)) {
+                val compLabelAttr = comp.searchAttributeByResourceId(ATTR_LABEL)
+                if (compLabelAttr != null) {
+                    compLabelAttr.setValueAsString(customLabel)
+                }
             }
         }
-        if (!patched) {
-            // Fallback: set inline string directly on android:label.
-            labelAttr.setValueAsString(customLabel)
+    }
+
+    private fun isLauncherComponent(element: ResXmlElement): Boolean {
+        for (intentFilter in CollectionUtil.toList(element.getElements("intent-filter"))) {
+            var hasMain = false
+            var hasLauncher = false
+            for (action in CollectionUtil.toList(intentFilter.getElements("action"))) {
+                val name = action.searchAttributeByResourceId(ATTR_NAME)?.getValueAsString()
+                if (name == "android.intent.action.MAIN") {
+                    hasMain = true
+                }
+            }
+            for (category in CollectionUtil.toList(intentFilter.getElements("category"))) {
+                val name = category.searchAttributeByResourceId(ATTR_NAME)?.getValueAsString()
+                if (name == "android.intent.category.LAUNCHER") {
+                    hasLauncher = true
+                }
+            }
+            if (hasMain && hasLauncher) return true
         }
+        return false
     }
 
     /**
@@ -406,7 +406,12 @@ class ManifestAndArscMutator {
                 throw IOException("Unable to replace mutated file: $target")
             }
             if (!tmp.renameTo(target)) {
-                throw IOException("Unable to move mutated APK into place: $target")
+                try {
+                    tmp.copyTo(target, overwrite = true)
+                    tmp.delete()
+                } catch (e: Exception) {
+                    throw IOException("Unable to move or copy mutated APK into place: $target", e)
+                }
             }
         } finally {
             if (tmp.exists()) tmp.delete()

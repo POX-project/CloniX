@@ -225,8 +225,12 @@ public final class CloneRuntimeEngine {
             Log.w(TAG, "ApplicationInfo.metaData is null; falling back to config.json only");
             return;
         }
-        sOrigApplicationClass = md.getString("cf.orig_application");
-        sOrigFactoryClass = md.getString("cf.orig_factory");
+        if (sOrigApplicationClass == null || sOrigApplicationClass.isEmpty()) {
+            sOrigApplicationClass = md.getString("cf.orig_application");
+        }
+        if (sOrigFactoryClass == null || sOrigFactoryClass.isEmpty()) {
+            sOrigFactoryClass = md.getString("cf.orig_factory");
+        }
         String mdOrigPkg = md.getString("cf.orig_package");
         String mdClonePkg = md.getString("cf.clone_package");
         String mdCloneSuffix = md.getString("cf.clone_suffix");
@@ -285,10 +289,25 @@ public final class CloneRuntimeEngine {
             merged.origPkg = parsed.origPkg;
             merged.clonePkg = parsed.clonePkg;
             merged.cloneSuffix = parsed.cloneSuffix;
+            merged.origApplication = parsed.origApplication;
+            merged.origFactory = parsed.origFactory;
             merged.authorityMap = new HashMap<>(parsed.authorityMap);
             merged.permissionMap = new HashMap<>(parsed.permissionMap);
-            // meta-data may have arrived first and is authoritative for the class names only.
+
+            if ((sOrigApplicationClass == null || sOrigApplicationClass.isEmpty())
+                    && parsed.origApplication != null && !parsed.origApplication.isEmpty()) {
+                sOrigApplicationClass = parsed.origApplication;
+            }
+            if ((sOrigFactoryClass == null || sOrigFactoryClass.isEmpty())
+                    && parsed.origFactory != null && !parsed.origFactory.isEmpty()) {
+                sOrigFactoryClass = parsed.origFactory;
+            }
+
             sConfig = merged;
+            Log.i(TAG, "Config loaded from assets: origPkg=" + merged.origPkg
+                    + ", clonePkg=" + merged.clonePkg
+                    + ", origApp=" + sOrigApplicationClass
+                    + ", origFactory=" + sOrigFactoryClass);
         }
     }
 

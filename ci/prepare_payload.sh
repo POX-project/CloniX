@@ -40,5 +40,15 @@ if [ -f "$AAR_NATIVE" ]; then
   done
 fi
 
+# Ensure any local jniLibs (e.g. libshadowhook_nothing.so) are copied
+if [ -d "$ROOT/native-bridge/src/main/jniLibs" ]; then
+  for abi_dir in "$ROOT/native-bridge/src/main/jniLibs"/*/; do
+    [ -d "$abi_dir" ] || continue
+    abi="$(basename "$abi_dir")"
+    mkdir -p "$ASSETS/native/$abi"
+    cp "$abi_dir"/*.so "$ASSETS/native/$abi/" 2>/dev/null || true
+  done
+fi
+
 echo "payload assets:"
 find "$ASSETS" -type f -exec ls -l {} \;

@@ -26,6 +26,8 @@ public final class CfConfig {
     public String origPkg = "";
     public String clonePkg = "";
     public String cloneSuffix = "";
+    public String origApplication = "";
+    public String origFactory = "";
     public Map<String, String> authorityMap = new HashMap<>();
     public Map<String, String> permissionMap = new HashMap<>();
 
@@ -51,6 +53,10 @@ public final class CfConfig {
                     cfg.clonePkg = reader.nextString();
                 } else if ("clone_suffix".equals(name)) {
                     cfg.cloneSuffix = reader.nextString();
+                } else if ("orig_application".equals(name)) {
+                    cfg.origApplication = reader.nextString();
+                } else if ("orig_factory".equals(name)) {
+                    cfg.origFactory = reader.nextString();
                 } else if ("authority_map".equals(name)) {
                     cfg.authorityMap = readStringMap(reader);
                 } else if ("permission_map".equals(name)) {

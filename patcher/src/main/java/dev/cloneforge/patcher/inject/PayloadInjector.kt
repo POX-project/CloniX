@@ -42,27 +42,40 @@ object PayloadInjector {
         // (a) Append the runtime dex as classes<N+1>.dex, aligned to 4 bytes.
         if (payloadDex.isFile) {
             val highest = ApkZipMapper.highestDexIndex(entries)
-            val dexBytes = payloadDex.readBytes()
             appended.add(
-                NewEntry(ApkZipMapper.dexNameForIndex(highest + 1), dexBytes,
-                    ApkZipMapper.METHOD_STORED, 4)
+                NewEntry(
+                    ApkZipMapper.dexNameForIndex(highest + 1),
+                    file = payloadDex,
+                    method = ApkZipMapper.METHOD_STORED,
+                    alignment = 4
+                )
             )
         }
 
-        // (b) assets/cloneforge payload entries - deflate them (config.json and
-        // the origin APK copy compress well).
+        // (b) assets/cloneforge payload entries:
+        // config.json and origin_cert.der are small (< 64KB); origin_apk.bin is the
+        // unmutated base.apk (often 50-200MB+ and already compressed), so it MUST be stored
+        // uncompressed (METHOD_STORED) and streamed directly from disk to avoid OutOfMemoryError.
         for ((entryName, file) in extraAssets) {
             if (!file.isFile) continue
-            appended.add(NewEntry(entryName, file.readBytes(), ApkZipMapper.METHOD_DEFLATED, 0))
+            if (entryName.endsWith(".bin") || entryName.endsWith(".apk") || file.length() > 512 * 1024) {
+                appended.add(NewEntry(entryName, file = file, method = ApkZipMapper.METHOD_STORED, alignment = 0))
+            } else {
+                appended.add(NewEntry(entryName, raw = file.readBytes(), method = ApkZipMapper.METHOD_DEFLATED, alignment = 0))
+            }
         }
 
-        // (c) lib/ABI .so entries - stored uncompressed with 16 KB alignment.
+        // (c) lib/ABI .so entries - stored uncompressed with 16 KB alignment, streamed from disk.
         for ((abi, libs) in nativeLibs) {
             for (file in libs) {
                 if (!file.isFile) continue
                 val entryName = "lib/$abi/${file.name}"
+                // If target APK already has libc++_shared.so, skip our copy to prevent collision
+                if (existingNames.contains(entryName) && file.name == "libc++_shared.so") {
+                    continue
+                }
                 appended.add(
-                    NewEntry(entryName, file.readBytes(), ApkZipMapper.METHOD_STORED, 16384)
+                    NewEntry(entryName, file = file, method = ApkZipMapper.METHOD_STORED, alignment = 16384)
                 )
             }
         }

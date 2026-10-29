@@ -22,7 +22,8 @@ data class CloneResult(
     val mutatedPackage: String?,
     val sessionId: Int,
     val success: Boolean,
-    val message: String
+    val message: String,
+    val apkPath: String? = null
 )
 
 /**
@@ -62,7 +63,9 @@ class CloneForgePipeline(
         cloneIndex: Int,
         appLabel: String,
         hueShiftDeg: Float,
-        silent: Boolean
+        silent: Boolean,
+        badgeEnabled: Boolean = true,
+        useRoot: Boolean = false
     ): CloneResult {
         val cloneSuffix = CfConstants.cloneSuffix(cloneIndex)
         val mutatedPackage = "$targetPackage.$cloneSuffix"
@@ -116,12 +119,14 @@ class CloneForgePipeline(
             val payloadDex = writeRuntimePayloadDex(payloadDir)
             val configJson = buildConfigJson(
                 bundle.originalPackageName, mutatedPackage, cloneSuffix,
+                mutation.originalApplicationClass, mutation.originalAppComponentFactory,
                 authorityMap, permissionMap, payloadDir
             )
             val originCert = File(payloadDir, "origin_cert.der")
             originCert.outputStream().use { output -> output.write(bundle.originalCertDer) }
 
-            val nativeLibs = collectNativeLibs(payloadDir)
+            val allTargetApks = listOf(bundle.baseApk) + bundle.splitApks
+            val nativeLibs = collectNativeLibs(payloadDir, allTargetApks)
 
             // ------------------------------------------------------------
             // Phase 4: Icon hue shift + payload injection (spec 4.1 / 6.2 / 7.1)
@@ -133,10 +138,11 @@ class CloneForgePipeline(
             } else {
                 hueShiftDeg
             }
-            if (effectiveHue != 0f) {
-                IconPatcher.applyIconHueShift(bundle.baseApk, emptyList(), effectiveHue)
+            val badgeText = if (badgeEnabled) "#$cloneIndex" else null
+            if (effectiveHue != 0f || badgeText != null) {
+                IconPatcher.applyIconHueShift(bundle.baseApk, emptyList(), effectiveHue, badgeText)
                 for (split in bundle.splitApks) {
-                    IconPatcher.applyIconHueShift(split, emptyList(), effectiveHue)
+                    IconPatcher.applyIconHueShift(split, emptyList(), effectiveHue, badgeText)
                 }
             }
 
@@ -174,20 +180,47 @@ class CloneForgePipeline(
                 signedSplits.add(signedSplit)
             }
 
+            // Persist the created clone APK so the user has the APK ready to install or export
+            val persistentDir = File(context.filesDir, "clones/$mutatedPackage").apply { mkdirs() }
+            val savedBaseApk = File(persistentDir, "$mutatedPackage.apk")
+            signedBase.copyTo(savedBaseApk, overwrite = true)
+            val savedSplits = ArrayList<File>(signedSplits.size)
+            for (split in signedSplits) {
+                val savedSplit = File(persistentDir, split.name)
+                split.copyTo(savedSplit, overwrite = true)
+                savedSplits.add(savedSplit)
+            }
+
             // ------------------------------------------------------------
-            // Phase 6: Atomic multi-APK install session (spec 7.3)
+            // Phase 6: Atomic multi-APK install session or Root Install (spec 7.3)
             // ------------------------------------------------------------
             progress(PROGRESS_INSTALL, "Installing…")
-            val commit = ClonePackageInstaller(context).installCloneBundle(
-                mutatedPackageName = mutatedPackage,
-                signedBaseApk = signedBase,
-                signedSplitApks = signedSplits,
-                silent = silent
-            )
-            progress(PROGRESS_DONE, "Clone installation session committed")
+            val rootSuccess = if (useRoot) {
+                dev.cloneforge.patcher.installer.RootHelper.installApk(savedBaseApk, savedSplits)
+            } else false
 
-            return CloneResult(mutatedPackage, commit.sessionId, true,
-                "Clone $mutatedPackage submitted for installation")
+            val sessionId = if (rootSuccess) {
+                progress(PROGRESS_DONE, "Clone installed silently via root")
+                -100
+            } else {
+                val commit = ClonePackageInstaller(context).installCloneBundle(
+                    mutatedPackageName = mutatedPackage,
+                    signedBaseApk = savedBaseApk,
+                    signedSplitApks = savedSplits,
+                    silent = silent
+                )
+                progress(PROGRESS_DONE, "Clone installation session committed")
+                commit.sessionId
+            }
+
+            return CloneResult(
+                mutatedPackage = mutatedPackage,
+                sessionId = sessionId,
+                success = true,
+                message = if (rootSuccess) "Clone $mutatedPackage installed successfully via root"
+                          else "Clone $mutatedPackage ready and installation session committed",
+                apkPath = savedBaseApk.absolutePath
+            )
         } catch (t: Throwable) {
             Log.e(TAG, "Clone build failed: ${t.message}", t)
             return CloneResult(mutatedPackage, -1, false, t.message ?: "Clone build failed")
@@ -236,6 +269,8 @@ class CloneForgePipeline(
         origPkg: String,
         clonePkg: String,
         cloneSuffix: String,
+        origApplication: String?,
+        origFactory: String?,
         authorityMap: Map<String, String>,
         permissionMap: Map<String, String>,
         payloadDir: File,
@@ -249,6 +284,8 @@ class CloneForgePipeline(
             .put("orig_pkg", origPkg)
             .put("clone_pkg", clonePkg)
             .put("clone_suffix", cloneSuffix)
+            .put("orig_application", origApplication.orEmpty())
+            .put("orig_factory", origFactory.orEmpty())
             .put("authority_map", authorityJson)
             .put("permission_map", permissionJson)
         val outFile = File(payloadDir, "config.json")
@@ -262,14 +299,64 @@ class CloneForgePipeline(
      * arm64-v8a > armeabi-v7a > x86_64, intersected with Build.SUPPORTED_ABIS.
      * Libraries come from host assets at cloneforge/native/<abi>/lib*.so.
      */
-    private fun collectNativeLibs(payloadDir: File): Map<String, List<File>> {
+    /**
+     * Determines which ABIs to inject into the clone based on:
+     * 1. ABIs present in the target APK (base + splits).
+     * 2. ABIs supported by the current device.
+     * 3. ABIs available in CloneForge assets.
+     *
+     * Crucial: If target APK only has 32-bit (armeabi-v7a), we NEVER inject arm64-v8a,
+     * which would force Android to launch the app in 64-bit mode and crash on dlopen.
+     */
+    private fun collectNativeLibs(payloadDir: File, allTargetApks: List<File>): Map<String, List<File>> {
         val result = LinkedHashMap<String, List<File>>()
         val supported = Build.SUPPORTED_ABIS?.toList() ?: emptyList()
-        val ordered = (ABI_PREFERENCE.filter { it in supported } +
-            supported.filter { it !in ABI_PREFERENCE })
         val assets = context.assets
 
-        for (abi in ordered) {
+        // Inspect target APKs for existing native libraries (lib/<abi>/...)
+        val targetAbis = LinkedHashSet<String>()
+        for (apk in allTargetApks) {
+            try {
+                val entries = dev.cloneforge.patcher.zip.ApkZipMapper.listEntries(apk)
+                for (entry in entries) {
+                    if (entry.name.startsWith("lib/")) {
+                        val parts = entry.name.split("/")
+                        if (parts.size >= 3 && parts[1].isNotBlank()) {
+                            targetAbis.add(parts[1])
+                        }
+                    }
+                }
+            } catch (ignored: Exception) {
+            }
+        }
+
+        // Determine candidate ABIs to inject:
+        val abisToInject = ArrayList<String>()
+        if (targetAbis.isNotEmpty()) {
+            for (abi in ABI_PREFERENCE) {
+                if (abi in targetAbis && abi in supported) {
+                    abisToInject.add(abi)
+                }
+            }
+            if (abisToInject.isEmpty()) {
+                for (abi in targetAbis) {
+                    if (abi in supported) {
+                        abisToInject.add(abi)
+                        break
+                    }
+                }
+            }
+        } else {
+            // Pure Java/Kotlin app with no native libs in target APK:
+            for (abi in ABI_PREFERENCE) {
+                if (abi in supported) {
+                    abisToInject.add(abi)
+                    break
+                }
+            }
+        }
+
+        for (abi in abisToInject) {
             val assetDir = "${CfConstants.ASSET_NATIVE_ROOT}/$abi"
             val libs = try {
                 (assets.list(assetDir)?.toList() ?: emptyList()).filter { it.endsWith(".so") }
@@ -287,10 +374,6 @@ class CloneForgePipeline(
                 files.add(file)
             }
             result[abi] = files
-            // Only inject one primary ABI plus compatible others actually
-            // present in the host assets; stop after the first preferred match
-            // to keep clone APK size small.
-            break
         }
         return result
     }

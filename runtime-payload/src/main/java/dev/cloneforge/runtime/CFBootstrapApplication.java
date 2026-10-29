@@ -49,6 +49,12 @@ public class CFBootstrapApplication extends Application {
     protected void attachBaseContext(Context base) {
         mBaseContext = base;
 
+        // Step 0: Lift hidden API restrictions so reflection/JNI into ART internals succeeds.
+        try {
+            HiddenApiBypass.addHiddenApiExemptions("L");
+        } catch (Throwable ignored) {
+        }
+
         // Engine init first — but never let it break attachBaseContext.
         try {
             CloneRuntimeEngine.preloadFromApplicationInfo(base.getApplicationInfo());

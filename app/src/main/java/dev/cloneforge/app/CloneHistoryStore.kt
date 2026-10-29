@@ -16,7 +16,8 @@ class CloneHistoryStore(context: Context) {
     data class CloneEntry(
         val originalPackage: String,
         val clonePackage: String,
-        val cloneLabel: String
+        val cloneLabel: String,
+        val apkPath: String = ""
     )
 
     private val prefs = context.applicationContext.getSharedPreferences(
@@ -25,14 +26,21 @@ class CloneHistoryStore(context: Context) {
     )
 
     /** Adds a clone to the history; re-cloning the same target overwrites the old row. */
-    fun addClone(originalPackage: String, clonePackage: String, cloneLabel: String) {
+    fun addClone(originalPackage: String, clonePackage: String, cloneLabel: String, apkPath: String = "") {
         if (originalPackage.isBlank() || clonePackage.isBlank()) return
         val existing = clones().filterNot {
             it.originalPackage == originalPackage && it.clonePackage == clonePackage
         }
-        val list = mutableListOf(CloneEntry(originalPackage, clonePackage, cloneLabel))
+        val list = mutableListOf(CloneEntry(originalPackage, clonePackage, cloneLabel, apkPath))
         list.addAll(existing)
         persist(list.take(MAX_ENTRIES))
+    }
+
+    /** Removes a clone from the history. */
+    fun removeClone(clonePackage: String) {
+        if (clonePackage.isBlank()) return
+        val existing = clones().filterNot { it.clonePackage == clonePackage }
+        persist(existing)
     }
 
     fun clones(): List<CloneEntry> = decode(prefs.getString(KEY_CLONES, null))
@@ -48,6 +56,7 @@ class CloneHistoryStore(context: Context) {
                     .put(KEY_ORIG, e.originalPackage)
                     .put(KEY_PKG, e.clonePackage)
                     .put(KEY_LABEL, e.cloneLabel)
+                    .put(KEY_APK_PATH, e.apkPath)
             )
         }
         prefs.edit().putString(KEY_CLONES, arr.toString()).apply()
@@ -63,7 +72,7 @@ class CloneHistoryStore(context: Context) {
                 val orig = obj.optString(KEY_ORIG)
                 val pkg = obj.optString(KEY_PKG)
                 if (orig.isBlank() || pkg.isBlank()) continue
-                out += CloneEntry(orig, pkg, obj.optString(KEY_LABEL))
+                out += CloneEntry(orig, pkg, obj.optString(KEY_LABEL), obj.optString(KEY_APK_PATH, ""))
             }
             out
         } catch (_: Exception) {
@@ -77,6 +86,7 @@ class CloneHistoryStore(context: Context) {
         const val KEY_ORIG = "orig"
         const val KEY_PKG = "pkg"
         const val KEY_LABEL = "label"
-        const val MAX_ENTRIES = 64
+        const val KEY_APK_PATH = "apk_path"
+        const val MAX_ENTRIES = 1024
     }
 }

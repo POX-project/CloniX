@@ -26,7 +26,8 @@ object CloneBus {
         val finished: Boolean,
         val success: Boolean,
         val mutatedPackage: String?,
-        val sessionId: Int
+        val sessionId: Int,
+        val apkPath: String? = null
     )
 
     private val _events = MutableSharedFlow<CloneProgressEvent>(

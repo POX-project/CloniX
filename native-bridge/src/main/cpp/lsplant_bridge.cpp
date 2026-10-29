@@ -51,6 +51,7 @@
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include <lsplant.hpp>
@@ -230,6 +231,15 @@ public:
         return direct;
     }
 
+    /** Linear scan of all symbol sections; first prefix match wins. */
+    void* FindPrefix(const char* prefix) const {
+        if (map_ == nullptr || prefix == nullptr) {
+            return nullptr;
+        }
+        return is64_ ? FindPrefixTyped<Elf64_Ehdr, Elf64_Shdr, Elf64_Sym>(prefix) :
+                       FindPrefixTyped<Elf32_Ehdr, Elf32_Shdr, Elf32_Sym>(prefix);
+    }
+
 private:
     template <typename EhdrT, typename ShdrT, typename SymT>
     void* FindTyped(const char* name) const {
@@ -268,11 +278,45 @@ private:
                     continue;
                 }
                 const char* sym_name = reinterpret_cast<const char*>(strtab + sym.st_name);
-                if (strncmp(sym_name, name, name_len) == 0 && sym_name[name_len] == '\0'
+                if (strncmp(sym_name, name, name_len) == 0 &&
+                        (sym_name[name_len] == '\0' || sym_name[name_len] == '.')
                         && sym.st_value != 0) {
                     if (found_first_ == nullptr) {
                         found_first_ = sym_name;
                     }
+                    return reinterpret_cast<void*>(sym.st_value);
+                }
+            }
+        }
+        return nullptr;
+    }
+
+    template <typename EhdrT, typename ShdrT, typename SymT>
+    void* FindPrefixTyped(const char* prefix) const {
+        auto base = static_cast<const unsigned char*>(map_);
+        auto ehdr = reinterpret_cast<const EhdrT*>(base);
+        size_t shnum = ehdr->e_shnum;
+        size_t shentsize = ehdr->e_shentsize;
+        size_t shoff = ehdr->e_shoff;
+        if (shnum == 0 || shentsize == 0) return nullptr;
+        if (shoff + shnum * shentsize > size_) return nullptr;
+        auto shdrs = reinterpret_cast<const ShdrT*>(base + shoff);
+        size_t prefix_len = strlen(prefix);
+        for (size_t i = 0; i < shnum; i++) {
+            const auto& sh = shdrs[i];
+            if (sh.sh_type != SHT_SYMTAB && sh.sh_type != SHT_DYNSYM) continue;
+            if (sh.sh_link >= shnum || sh.sh_entsize == 0) continue;
+            const auto& str_sh = shdrs[sh.sh_link];
+            auto strtab = base + str_sh.sh_offset;
+            size_t strtab_size = str_sh.sh_size;
+            if (sh.sh_offset + sh.sh_size > size_) continue;
+            auto syms = reinterpret_cast<const SymT*>(base + sh.sh_offset);
+            size_t count = sh.sh_size / sh.sh_entsize;
+            for (size_t s = 0; s < count; s++) {
+                const SymT& sym = syms[s];
+                if (sym.st_name >= strtab_size) continue;
+                const char* sym_name = reinterpret_cast<const char*>(strtab + sym.st_name);
+                if (strncmp(sym_name, prefix, prefix_len) == 0 && sym.st_value != 0) {
                     return reinterpret_cast<void*>(sym.st_value);
                 }
             }
@@ -317,8 +361,20 @@ static void* resolveArtSymbol(std::string_view symbol) {
     }
     void* rel = g_art_elf->Find(std::string(symbol).c_str());
     if (rel == nullptr) {
+        // Android 14+ compatibility:
+        // art::jit::JitCodeCache::GarbageCollectCache(Thread*) was replaced by
+        // art::jit::JitCodeCache::DoCollection(Thread*). Both have identical signature (Thread*).
+        if (symbol == "_ZN3art3jit12JitCodeCache19GarbageCollectCacheEPNS_6ThreadE") {
+            rel = g_art_elf->Find("_ZN3art3jit12JitCodeCache12DoCollectionEPNS_6ThreadE");
+            if (rel != nullptr) {
+                LOGI("lsplant: resolveArtSymbol redirected GarbageCollectCache -> DoCollection (%p)", rel);
+                return reinterpret_cast<void*>(g_art_base + reinterpret_cast<uintptr_t>(rel));
+            }
+        }
+        LOGW("lsplant: resolveArtSymbol failed for %s", std::string(symbol).c_str());
         return nullptr;
     }
+    LOGI("lsplant: resolveArtSymbol succeeded for %s", std::string(symbol).c_str());
     return reinterpret_cast<void*>(g_art_base + reinterpret_cast<uintptr_t>(rel));
 }
 
@@ -330,6 +386,45 @@ static JavaVM* g_vm = nullptr;
 static std::once_flag g_lsplant_init_once;
 static bool g_lsplant_ok = false;
 
+static void applyNativeHiddenApiExemptions(JNIEnv* env) {
+    if (env == nullptr) return;
+    // Ensure libart is parsed
+    resolveArtSymbol("");
+    if (!g_art_ready || g_art_elf == nullptr) return;
+
+    void* rel = g_art_elf->FindPrefix("_ZN3artL32VMRuntime_setHiddenApiExemptions");
+    if (rel == nullptr) {
+        LOGW("lsplant: VMRuntime_setHiddenApiExemptions not found in libart.so");
+        return;
+    }
+    void* abs_addr = reinterpret_cast<void*>(g_art_base + reinterpret_cast<uintptr_t>(rel));
+    using set_exemptions_fn = void (*)(JNIEnv*, jclass, jobjectArray);
+    auto fn = reinterpret_cast<set_exemptions_fn>(abs_addr);
+
+    jclass strClass = env->FindClass("java/lang/String");
+    if (strClass == nullptr) {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        return;
+    }
+    jstring prefix = env->NewStringUTF("L");
+    if (prefix == nullptr) {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        return;
+    }
+    jobjectArray arr = env->NewObjectArray(1, strClass, prefix);
+    if (arr == nullptr) {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        return;
+    }
+    fn(env, nullptr, arr);
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        LOGW("lsplant: native VMRuntime_setHiddenApiExemptions threw exception");
+    } else {
+        LOGI("lsplant: native VMRuntime_setHiddenApiExemptions applied successfully");
+    }
+}
+
 static bool lsplantInitOnce(JNIEnv* env) {
     std::call_once(g_lsplant_init_once, [&]() {
         if (env == nullptr) {
@@ -339,6 +434,11 @@ static bool lsplantInitOnce(JNIEnv* env) {
         // so a stray direct call cannot reach shadowhook_hook_func_addr on an
         // uninitialized shadowhook.
         cf_shadowhook_ensure_init();
+        applyNativeHiddenApiExemptions(env);
+
+        static std::mutex s_stub_map_mutex;
+        static std::unordered_map<void*, void*> s_target_to_stub;
+        static std::unordered_map<void*, void*> s_orig_to_stub;
 
         lsplant::InitInfo info{};
         info.inline_hooker = [](void* target, void* hooker) -> void* {
@@ -346,21 +446,64 @@ static bool lsplantInitOnce(JNIEnv* env) {
                 return nullptr;
             }
             void* orig = nullptr;
-            // The returned stub executes the original and doubles as LSPlant's backup fn.
             void* stub = shadowhook_hook_func_addr(target, hooker, &orig);
             if (stub == nullptr) {
-                LOGW("lsplant: shadowhook_hook_func_addr failed for target %p", target);
+                int err = shadowhook_get_errno();
+                LOGW("lsplant: shadowhook_hook_func_addr failed for target %p (errno=%d: %s)",
+                     target, err, shadowhook_to_errmsg(err));
                 return nullptr;
             }
-            return stub;
+            {
+                std::lock_guard<std::mutex> lock(s_stub_map_mutex);
+                s_target_to_stub[target] = stub;
+                if (orig != nullptr) {
+                    s_orig_to_stub[orig] = stub;
+                }
+            }
+            LOGI("lsplant: hooked target %p -> backup orig %p (stub %p)", target, orig, stub);
+            // LSPlant contract: return callable backup function (orig), NOT internal stub handle!
+            return (orig != nullptr) ? orig : stub;
         };
-        info.inline_unhooker = [](void* stub) -> bool {
-            return stub != nullptr && shadowhook_unhook(stub) == 0;
+        info.inline_unhooker = [](void* func) -> bool {
+            if (func == nullptr) return false;
+            void* stub = nullptr;
+            {
+                std::lock_guard<std::mutex> lock(s_stub_map_mutex);
+                auto it = s_target_to_stub.find(func);
+                if (it != s_target_to_stub.end()) {
+                    stub = it->second;
+                    s_target_to_stub.erase(it);
+                } else {
+                    auto it2 = s_orig_to_stub.find(func);
+                    if (it2 != s_orig_to_stub.end()) {
+                        stub = it2->second;
+                        s_orig_to_stub.erase(it2);
+                    } else {
+                        stub = func;
+                    }
+                }
+            }
+            if (stub == nullptr) {
+                LOGW("lsplant: unhook failed, unknown target %p", func);
+                return false;
+            }
+            int res = shadowhook_unhook(stub);
+            LOGI("lsplant: unhook func %p (stub %p) -> %d", func, stub, res);
+            return res == 0;
         };
         info.art_symbol_resolver = [](std::string_view name) -> void* {
             return resolveArtSymbol(name);
         };
-        info.art_symbol_prefix_resolver = nullptr;  // optional in v6.x (unused by lsplant.cc)
+        info.art_symbol_prefix_resolver = [](std::string_view prefix) -> void* {
+            if (!g_art_ready || g_art_elf == nullptr) return nullptr;
+            void* rel = g_art_elf->FindPrefix(std::string(prefix).c_str());
+            if (rel == nullptr) {
+                LOGW("lsplant: prefix resolver failed for %s", std::string(prefix).c_str());
+                return nullptr;
+            }
+            LOGI("lsplant: prefix resolver succeeded for %s", std::string(prefix).c_str());
+            return reinterpret_cast<void*>(g_art_base + reinterpret_cast<uintptr_t>(rel));
+        };
         // Default names are kept (generated_class_name = "LSPHooker_"). PackageNameRouter's
         // stack filter relies on this literal — change it only in both places together.
         info.generated_class_name = "LSPHooker_";

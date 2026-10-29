@@ -123,6 +123,11 @@ public final class DeviceIdentityHook {
         return p == null ? null : p.bluetoothName;
     }
 
+    public static String getSerialNumber() {
+        VirtualDeviceProfile p = sProfile;
+        return p == null ? null : p.serialNumber;
+    }
+
     // ---------------------------------------------------------------------------------------------
     // Profile generation (SecureRandom seed + HMAC-SHA256 seeded by clone_pkg)
     // ---------------------------------------------------------------------------------------------
@@ -145,6 +150,7 @@ public final class DeviceIdentityHook {
         p.iccid = buildIccid(hmac(seed, pkg + ":iccid"));
         p.macAddress = buildMac(hmac(seed, pkg + ":mac"));
         p.bluetoothName = "CF-" + toHex(hmac(seed, pkg + ":bt_name"), 6).toUpperCase();
+        p.serialNumber = "CF" + toHex(hmac(seed, pkg + ":serial"), 10).toUpperCase();
 
         p.deviceSeedB64 = seedB64;
         return p;
@@ -278,6 +284,7 @@ public final class DeviceIdentityHook {
         String iccid;
         String macAddress;
         String bluetoothName;
+        String serialNumber;
         String deviceSeedB64;
     }
 
@@ -290,6 +297,7 @@ public final class DeviceIdentityHook {
                 .append(",\"iccid\":\"").append(quote(p.iccid)).append('"')
                 .append(",\"mac_address\":\"").append(quote(p.macAddress)).append('"')
                 .append(",\"bt_name\":\"").append(quote(p.bluetoothName)).append('"')
+                .append(",\"serial_number\":\"").append(quote(p.serialNumber)).append('"')
                 .append(",\"device_seed\":\"").append(quote(p.deviceSeedB64)).append('"')
                 .append('}').toString();
     }
@@ -341,6 +349,7 @@ public final class DeviceIdentityHook {
         p.iccid = extract(json, "iccid");
         p.macAddress = extract(json, "mac_address");
         p.bluetoothName = extract(json, "bt_name");
+        p.serialNumber = extract(json, "serial_number");
         p.deviceSeedB64 = extract(json, "device_seed");
         if (p.androidId == null || p.widevineIdB64 == null) {
             return null; // generation parity change → regenerate
@@ -515,9 +524,40 @@ public final class DeviceIdentityHook {
         } catch (Throwable t) {
             Log.w(TAG, "identity hook GMS Ads failed (skipped)", t);
         }
+
+        // 7. BluetoothAdapter.getName — Bluetooth nickname from profile
+        try {
+            Class<?> btAdapter = Class.forName("android.bluetooth.BluetoothAdapter");
+            for (Method m : btAdapter.getDeclaredMethods()) {
+                if ("getName".equals(m.getName()) && m.getReturnType() == String.class
+                        && m.getParameterCount() == 0) {
+                    HookerHandler btName = (hooker, args) -> p.bluetoothName;
+                    if (Hooker.hook(m, btName) != null) {
+                        Log.i(TAG, "identity hook: BluetoothAdapter.getName");
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "identity hook BluetoothAdapter failed (skipped)", t);
+        }
+
+        // 8. Build.getSerial — synthetic hardware serial
+        try {
+            for (Method m : android.os.Build.class.getDeclaredMethods()) {
+                if ("getSerial".equals(m.getName()) && m.getReturnType() == String.class
+                        && m.getParameterCount() == 0) {
+                    HookerHandler serial = (hooker, args) -> p.serialNumber;
+                    if (Hooker.hook(m, serial) != null) {
+                        Log.i(TAG, "identity hook: Build.getSerial");
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "identity hook Build.getSerial failed (skipped)", t);
+        }
     }
 
-    private static final int HOOK_TARGET_COUNT = 6;
+    private static final int HOOK_TARGET_COUNT = 8;
 
     /** TelephonyManager facade getters getImei/getDeviceId/getSubscriberId/getSimSerialNumber. */
     private static void installTelephonyIdentityHooks(VirtualDeviceProfile p) {

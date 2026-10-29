@@ -47,14 +47,21 @@ class RawZipEntry internal constructor(
     val isStored: Boolean get() = method == ApkZipMapper.METHOD_STORED
 }
 
-/** A brand new entry to append to the output archive. */
+/** A brand new entry to append to the output archive. Supports either in-memory byte array or direct file streaming. */
 class NewEntry(
     val name: String,
-    val raw: ByteArray,
+    val raw: ByteArray? = null,
+    val file: File? = null,
     val method: Int,
     /** Data offset alignment boundary in the output archive (0 = no padding). */
     val alignment: Int,
-)
+) {
+    constructor(name: String, raw: ByteArray, method: Int, alignment: Int) :
+        this(name, raw, null, method, alignment)
+
+    constructor(name: String, file: File, method: Int, alignment: Int) :
+        this(name, null, file, method, alignment)
+}
 
 /** Minimal little-endian writer. */
 internal class LeWriter(private val out: OutputStream) : Closeable {
@@ -158,6 +165,7 @@ object ApkZipMapper {
                 val commentLen = u16(header, 32)
                 val name = readString(raf, nameLen)
                 skipFully(raf, (extraLen + commentLen).toLong())
+                val nextCdOffset = raf.filePointer
 
                 val lfhOffset = u32(header, 42)
                 // The local header is authoritative for name/extra lengths; the CD
@@ -167,6 +175,7 @@ object ApkZipMapper {
                 raf.readFully(tail.array())
                 val lfhNameLen = u16(tail, 0)
                 val lfhExtraLen = u16(tail, 2)
+                raf.seek(nextCdOffset)
 
                 result.add(
                     RawZipEntry(
@@ -320,13 +329,13 @@ object ApkZipMapper {
 
                 // 3. Appended entries.
                 for (spec in appended) {
-                    offset = writeFreshEntry(out, records, spec.method, spec.raw, spec.name, offset,
-                        maxOf(spec.alignment, alignmentForName(spec.name, spec.method)), null)
+                    offset = writeAppendedEntry(out, records, spec, offset)
                 }
 
                 // 4. Central directory + EOCD.
-                writeCentralDirectory(out, records)
-                writeEocd(out, records)
+                val cdOffset = offset
+                val cdSize = writeCentralDirectory(out, records)
+                writeEocd(out, records, cdOffset, cdSize)
             } finally {
                 out.close()
             }
@@ -433,6 +442,81 @@ object ApkZipMapper {
         return startOffset + LFH_FIXED + nameBytes.size + pad + compressedSize
     }
 
+    private fun writeAppendedEntry(
+        out: LeWriter,
+        records: MutableList<CdRecord>,
+        spec: NewEntry,
+        startOffset: Long,
+    ): Long {
+        val file = spec.file
+        if (file != null) {
+            val alignment = maxOf(spec.alignment, alignmentForName(spec.name, spec.method))
+            val uncompressedSize = file.length()
+            val nameBytes = spec.name.toByteArray(Charsets.UTF_8)
+            val pad = alignmentPadding(startOffset + LFH_FIXED + nameBytes.size, alignment)
+            val crc = crcOfFile(file)
+            val compressedSize = uncompressedSize // Streaming METHOD_STORED
+
+            out.writeInt(SIG_LFH.toLong())
+            out.writeShort(20)
+            out.writeShort(FLAG_UTF8)
+            out.writeShort(spec.method)
+            out.writeShort(DOS_TIME)
+            out.writeShort(DOS_DATE)
+            out.writeInt(crc)
+            out.writeInt(compressedSize)
+            out.writeInt(uncompressedSize)
+            out.writeShort(nameBytes.size)
+            out.writeShort(pad.toInt())
+            out.writeFully(nameBytes)
+            if (pad > 0) out.writeZeros(pad)
+
+            val buf = ByteArray(64 * 1024)
+            file.inputStream().use { input ->
+                var n: Int
+                while (input.read(buf).also { n = it } > 0) {
+                    out.writeFully(buf, 0, n)
+                }
+            }
+
+            records.add(
+                CdRecord(
+                    name = spec.name,
+                    method = spec.method,
+                    crc = crc,
+                    compressedSize = compressedSize,
+                    uncompressedSize = uncompressedSize,
+                    lfhOffset = startOffset,
+                    dosTime = DOS_TIME,
+                    dosDate = DOS_DATE,
+                    versionMadeBy = 0x031E,
+                    versionNeeded = 20,
+                    internalAttributes = 0,
+                    externalAttributes = 0L,
+                )
+            )
+            return startOffset + LFH_FIXED + nameBytes.size + pad + compressedSize
+        } else {
+            val raw = spec.raw ?: ByteArray(0)
+            return writeFreshEntry(
+                out, records, spec.method, raw, spec.name, startOffset,
+                maxOf(spec.alignment, alignmentForName(spec.name, spec.method)), null
+            )
+        }
+    }
+
+    private fun crcOfFile(file: File): Long {
+        val crc = CRC32()
+        val buf = ByteArray(64 * 1024)
+        file.inputStream().use { input ->
+            var n: Int
+            while (input.read(buf).also { n = it } > 0) {
+                crc.update(buf, 0, n)
+            }
+        }
+        return crc.value
+    }
+
     private fun recordOf(
         e: RawZipEntry,
         method: Int,
@@ -455,7 +539,8 @@ object ApkZipMapper {
         externalAttributes = e.externalAttributes,
     )
 
-    private fun writeCentralDirectory(out: LeWriter, records: List<CdRecord>) {
+    private fun writeCentralDirectory(out: LeWriter, records: List<CdRecord>): Long {
+        var size = 0L
         for (r in records) {
             val nameBytes = r.name.toByteArray(Charsets.UTF_8)
             out.writeInt(SIG_CD.toLong())
@@ -476,24 +561,12 @@ object ApkZipMapper {
             out.writeInt(r.externalAttributes)
             out.writeInt(r.lfhOffset)
             out.writeFully(nameBytes)
+            size += CD_FIXED + nameBytes.size
         }
+        return size
     }
 
-    private fun writeEocd(out: LeWriter, records: List<CdRecord>) {
-        var cdSize = 0L
-        var cdOffset = 0L
-        if (records.isNotEmpty()) {
-            // CD starts immediately after the last local entry.
-            var lastEnd = 0L
-            for (r in records) {
-                val end = r.lfhOffset + LFH_FIXED + r.name.toByteArray(Charsets.UTF_8).size + r.compressedSize
-                if (end > lastEnd) lastEnd = end
-            }
-            cdOffset = lastEnd
-            for (r in records) {
-                cdSize += CD_FIXED + r.name.toByteArray(Charsets.UTF_8).size
-            }
-        }
+    private fun writeEocd(out: LeWriter, records: List<CdRecord>, cdOffset: Long, cdSize: Long) {
         out.writeInt(SIG_EOCD.toLong())
         out.writeShort(0) // disk number
         out.writeShort(0) // cd disk
@@ -563,6 +636,13 @@ object ApkZipMapper {
     /** Rename with graceful fallback for filesystems where target may exist. */
     internal fun renameFile(tmp: File, target: File): Boolean {
         if (target.exists() && !target.delete()) return false
-        return tmp.renameTo(target)
+        if (tmp.renameTo(target)) return true
+        return try {
+            tmp.copyTo(target, overwrite = true)
+            tmp.delete()
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 }

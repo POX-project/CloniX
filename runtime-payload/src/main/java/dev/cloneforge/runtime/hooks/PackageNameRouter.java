@@ -124,7 +124,23 @@ public final class PackageNameRouter {
             Log.w(TAG, "PackageNameRouter: ContextImpl#getOpPackageName hook failed (row)", t);
         }
 
-        // 3. Resources.getIdentifier — rewrite defPackage when the clone queries by its own name.
+        // 3. ContextImpl#getBasePackageName — stack-aware matrix
+        try {
+            Class<?> ctxImpl = Class.forName("android.app.ContextImpl");
+            HookerHandler router = (hooker, args) -> decideStackAwarePackageName(hooker, args);
+            for (Method m : ctxImpl.getDeclaredMethods()) {
+                if ("getBasePackageName".equals(m.getName()) && m.getReturnType() == String.class
+                        && m.getParameterCount() == 0) {
+                    if (Hooker.hook(m, router) != null) {
+                        hooked++;
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "PackageNameRouter: ContextImpl#getBasePackageName hook failed (row)", t);
+        }
+
+        // 4. Resources.getIdentifier — rewrite defPackage when the clone queries by its own name.
         try {
             Method m = android.content.res.Resources.class
                     .getDeclaredMethod("getIdentifier", String.class, String.class, String.class);
@@ -144,7 +160,7 @@ public final class PackageNameRouter {
             Log.w(TAG, "PackageNameRouter: Resources#getIdentifier hook failed (row)", t);
         }
 
-        Log.i(TAG, "PackageNameRouter: " + hooked + " LSPlant hook(s) installed");
+        Log.i(TAG, "PackageNameRouter: " + hooked + " LSPlant hook(s) installed (target=org=" + sOrigPkg + ", clone=" + sClonePkg + ")");
         return hooked > 0;
     }
 
@@ -153,28 +169,78 @@ public final class PackageNameRouter {
     // ---------------------------------------------------------------------------------------------
 
     /**
-     * §5.3 stack-aware matrix. The LSPlant callback replaces the target frame entirely, so the
-     * first stack frame that is neither ours nor the generated hooker IS the caller of
-     * ContextImpl.getPackageName().
+     * §5.3 stack-aware matrix.
+     * When any caller frame is a system manager/service (NotificationManager, AlarmManager,
+     * JobScheduler, ActivityManager, etc.) or an internal ContextImpl framework operation
+     * (like getExternalFilesDirs, sendBroadcast, etc.), returns the real UID-bound clone package
+     * name so Android OS/system server authorization succeeds.
+     * When queried directly by application code, returns origPkg so package-name checks pass.
      */
     private static String decideStackAwarePackageName(Hooker hooker, Object[] args) {
+        StackTraceElement[] stack = null;
+        try {
+            stack = Thread.currentThread().getStackTrace();
+        } catch (Throwable ignored) {
+        }
+        if (stack != null) {
+            for (int i = 1; i < stack.length; i++) {
+                StackTraceElement frame = stack[i];
+                String cls = frame.getClassName();
+                String method = frame.getMethodName();
+                if (cls == null || isIgnoredFrame(cls)) {
+                    continue;
+                }
+                // If ContextImpl called getPackageName() internally from another method
+                // (e.g. getExternalFilesDirs, getExternalCacheDirs, sendBroadcast, etc.):
+                if (cls.equals("android.app.ContextImpl")) {
+                    if (!"getPackageName".equals(method) && !"getOpPackageName".equals(method) && !"getBasePackageName".equals(method)) {
+                        return sClonePkg;
+                    }
+                    continue; // Skip the getPackageName self-frame
+                }
+                // If ContextWrapper called getPackageName() from another method:
+                if (cls.equals("android.content.ContextWrapper")) {
+                    if (!"getPackageName".equals(method) && !"getOpPackageName".equals(method) && !"getBasePackageName".equals(method)) {
+                        return sClonePkg;
+                    }
+                    continue; // Skip ContextWrapper.getPackageName delegation
+                }
+                // Any other system framework class caller (NotificationManager, AlarmManager, etc.):
+                if (isSystemClassName(cls)) {
+                    return sClonePkg;
+                }
+            }
+        }
         String caller = firstRealCaller();
-        if (caller != null && isSystemClassName(caller)) {
+        if (caller != null && isSystemClassName(caller)
+                && !caller.equals("android.content.ContextWrapper")
+                && !caller.equals("android.app.ContextImpl")) {
             return sClonePkg;
         }
         return sOrigPkg;
     }
 
     /**
-     * Walks the current stack skipping stack[0] (getStackTrace itself), our payload frames and
-     * the LSPlant generated stub; returns the first remaining frame's class or null.
+     * Walks the current stack skipping stack[0] (getStackTrace itself), our payload frames,
+     * the LSPlant generated stub, and ContextImpl/ContextWrapper getPackageName self frames;
+     * returns the first remaining frame's class or null.
      */
     private static String firstRealCaller() {
         try {
             StackTraceElement[] stack = Thread.currentThread().getStackTrace();
             for (int i = 1; i < stack.length; i++) {
-                String cls = stack[i].getClassName();
+                StackTraceElement frame = stack[i];
+                String cls = frame.getClassName();
+                String method = frame.getMethodName();
                 if (cls == null || isIgnoredFrame(cls)) {
+                    continue;
+                }
+                if (cls.equals("android.app.ContextImpl")
+                        && ("getPackageName".equals(method) || "getOpPackageName".equals(method) || "getBasePackageName".equals(method))) {
+                    continue;
+                }
+                if (cls.equals("android.content.ContextWrapper")
+                        && ("getPackageName".equals(method) || "getOpPackageName".equals(method) || "getBasePackageName".equals(method))) {
                     continue;
                 }
                 return cls;
@@ -185,6 +251,9 @@ public final class PackageNameRouter {
     }
 
     private static boolean isIgnoredFrame(String className) {
+        if (className.contains("LSPHooker_") || className.contains("lsplant") || className.startsWith("LSP")) {
+            return true;
+        }
         for (String prefix : IGNORED_FRAME_PREFIXES) {
             if (className.startsWith(prefix)) {
                 return true;

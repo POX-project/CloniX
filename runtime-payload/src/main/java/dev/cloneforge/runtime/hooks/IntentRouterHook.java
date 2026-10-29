@@ -99,23 +99,27 @@ public final class IntentRouterHook {
         // Shape 1: android.app.ActivityManagerNative.gDefault (Singleton<IActivityManager>) — API 28–30.
         try {
             Class<?> amn = Class.forName("android.app.ActivityManagerNative");
-            return amn.getDeclaredField("gDefault").get(null);
-        } catch (ClassNotFoundException e) {
+            Field f = findField(amn, "gDefault");
+            if (f != null) {
+                return f.get(null);
+            }
+        } catch (ClassNotFoundException ignored) {
             // ActivityManagerNative removed on newer builds.
-        } catch (NoSuchFieldException e) {
-            // field renamed on this build; fall through.
         }
 
-        // Shape 2: android.app.ActivityManager.IActivityManagerSingleton — API 26–33+ (unsupported but present).
+        // Shape 2: android.app.ActivityManager.IActivityManagerSingleton — API 26–36.
         try {
             Class<?> am = Class.forName("android.app.ActivityManager");
-            return am.getDeclaredField("IActivityManagerSingleton").get(null);
-        } catch (NoSuchFieldException e) {
-            // Shape 3: getService() static accessor (API 33+ removed the field in some builds) —
-            // without a singleton handle we cannot swap the proxy in, so treat as unavailable.
-            Log.w(TAG, "No IActivityManager singleton handle found; IAM proxy skipped");
-            return null;
+            Field f = findField(am, "IActivityManagerSingleton");
+            if (f != null) {
+                return f.get(null);
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "Looking up IActivityManagerSingleton failed: " + t);
         }
+
+        Log.w(TAG, "No IActivityManager singleton handle found; IAM proxy skipped");
+        return null;
     }
 
     @SuppressLint("PrivateApi")

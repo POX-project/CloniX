@@ -5,16 +5,25 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:paddingStart="20dp"
-    android:paddingTop="16dp"
-    android:paddingEnd="20dp"
-    android:paddingBottom="24dp">
+    android:paddingStart="24dp"
+    android:paddingTop="20dp"
+    android:paddingEnd="24dp"
+    android:paddingBottom="28dp">
+
+    <!-- Header Drag Handle -->
+    <View
+        android:layout_width="36dp"
+        android:layout_height="4dp"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginBottom="16dp"
+        android:alpha="0.4"
+        android:background="@drawable/ic_launcher_foreground" />
 
     <TextView
         android:id="@+id/tv_sheet_app"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:textAppearance="?attr/textAppearanceHeadlineSmall" />
+        android:textAppearance="?attr/textAppearanceTitleLarge" />
 
     <TextView
         android:id="@+id/tv_sheet_hint"
@@ -25,6 +34,7 @@
         android:textAppearance="?attr/textAppearanceBodySmall"
         android:alpha="0.7" />
 
+    <!-- Prefix Input -->
     <com.google.android.material.textfield.TextInputLayout
         android:id="@+id/til_prefix"
         style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
@@ -41,6 +51,7 @@
             android:maxLines="1" />
     </com.google.android.material.textfield.TextInputLayout>
 
+    <!-- Clone Count Section -->
     <TextView
         android:id="@+id/tv_count_label"
         android:layout_width="match_parent"
@@ -49,12 +60,192 @@
         android:text="@string/label_clone_count"
         android:textAppearance="?attr/textAppearanceTitleSmall" />
 
-    <NumberPicker
-        android:id="@+id/picker_count"
-        android:layout_width="wrap_content"
-        android:layout_height="120dp"
-        android:layout_gravity="center_horizontal" />
+    <!-- Quick Count Chips -->
+    <com.google.android.material.chip.ChipGroup
+        android:id="@+id/chip_group_count"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        app:singleSelection="true">
 
+        <com.google.android.material.chip.Chip
+            android:id="@+id/chip_count_1"
+            style="@style/Widget.Material3.Chip.Filter"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="true"
+            android:text="1" />
+
+        <com.google.android.material.chip.Chip
+            android:id="@+id/chip_count_2"
+            style="@style/Widget.Material3.Chip.Filter"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="2" />
+
+        <com.google.android.material.chip.Chip
+            android:id="@+id/chip_count_3"
+            style="@style/Widget.Material3.Chip.Filter"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="3" />
+
+        <com.google.android.material.chip.Chip
+            android:id="@+id/chip_count_5"
+            style="@style/Widget.Material3.Chip.Filter"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="5" />
+
+        <com.google.android.material.chip.Chip
+            android:id="@+id/chip_count_10"
+            style="@style/Widget.Material3.Chip.Filter"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="10" />
+    </com.google.android.material.chip.ChipGroup>
+
+    <!-- Number Stepper Row (No upper limit!) -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_count_minus"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:insetLeft="0dp"
+            android:insetTop="0dp"
+            android:insetRight="0dp"
+            android:insetBottom="0dp"
+            android:padding="0dp"
+            android:text="−"
+            android:textSize="20sp"
+            app:cornerRadius="24dp" />
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/til_count"
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="12dp"
+            android:layout_marginEnd="12dp">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/edit_count"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:inputType="number"
+                android:maxLines="1"
+                android:text="1"
+                android:textSize="18sp" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_count_plus"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:insetLeft="0dp"
+            android:insetTop="0dp"
+            android:insetRight="0dp"
+            android:insetBottom="0dp"
+            android:padding="0dp"
+            android:text="+"
+            android:textSize="20sp"
+            app:cornerRadius="24dp" />
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginTop="16dp"
+        android:layout_marginBottom="12dp"
+        android:alpha="0.1"
+        android:background="?android:attr/colorForeground" />
+
+    <!-- Add Number to App Name Switch -->
+    <LinearLayout
+        android:id="@+id/ll_name_number_row"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/tv_name_number_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/label_number_in_name"
+                android:textAppearance="?attr/textAppearanceTitleSmall" />
+
+            <TextView
+                android:id="@+id/tv_name_number_helper"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/label_number_in_name_hint"
+                android:textAppearance="?attr/textAppearanceBodySmall"
+                android:alpha="0.7" />
+        </LinearLayout>
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/switch_number_in_name"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="true" />
+    </LinearLayout>
+
+    <!-- Add Number to Icon Badge Switch -->
+    <LinearLayout
+        android:id="@+id/ll_badge_row"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/tv_badge_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/label_number_in_icon"
+                android:textAppearance="?attr/textAppearanceTitleSmall" />
+
+            <TextView
+                android:id="@+id/tv_badge_helper"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/label_number_in_icon_hint"
+                android:textAppearance="?attr/textAppearanceBodySmall"
+                android:alpha="0.7" />
+        </LinearLayout>
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/switch_number_in_icon"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="true" />
+    </LinearLayout>
+
+    <!-- Auto Hue Shift Switch -->
     <LinearLayout
         android:id="@+id/ll_hue_row"
         android:layout_width="match_parent"
@@ -92,13 +283,52 @@
             android:checked="true" />
     </LinearLayout>
 
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/btn_start_clone"
+    <!-- Silent Root Install Switch -->
+    <LinearLayout
+        android:id="@+id/ll_root_row"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="20dp"
-        android:backgroundTint="@color/cf_primary"
+        android:layout_marginTop="12dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/tv_root_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/label_root_install"
+                android:textAppearance="?attr/textAppearanceTitleSmall" />
+
+            <TextView
+                android:id="@+id/tv_root_helper"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/label_root_install_hint"
+                android:textAppearance="?attr/textAppearanceBodySmall"
+                android:alpha="0.7" />
+        </LinearLayout>
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/switch_root"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="false" />
+    </LinearLayout>
+
+    <!-- Start Button -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_start_clone"
+        style="@style/Widget.Material3.Button"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_marginTop="24dp"
         android:text="@string/button_start_clones"
-        android:textColor="@color/cf_on_primary"
-        app:cornerRadius="14dp" />
+        android:textSize="16sp"
+        app:cornerRadius="16dp" />
 </LinearLayout>

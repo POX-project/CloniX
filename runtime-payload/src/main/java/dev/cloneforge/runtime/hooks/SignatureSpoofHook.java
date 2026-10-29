@@ -80,43 +80,176 @@ public final class SignatureSpoofHook {
                         String methodName = method.getName();
 
                         // 1. getPackageInfo(String packageName, long|int flags, [int userId])
-                        if ("getPackageInfo".equals(methodName) && args != null && args.length >= 1
-                                && args[0] instanceof String) {
-                            String requestedPkg = (String) args[0];
-                            boolean isTarget = mClonePkg.equals(requestedPkg)
-                                    || mOriginalPkg.equals(requestedPkg);
-
-                            if (mOriginalPkg.equals(requestedPkg)) {
-                                // Redirect to the installed clone package so the query succeeds
-                                // even with the original app removed from the device.
-                                args[0] = mClonePkg;
+                        //    and getPackageInfoVersioned(VersionedPackage, long|int flags, [int userId])
+                        if (("getPackageInfo".equals(methodName) || "getPackageInfoVersioned".equals(methodName))
+                                && args != null && args.length >= 1) {
+                            String requestedPkg = null;
+                            if (args[0] instanceof String) {
+                                requestedPkg = (String) args[0];
+                                if (mOriginalPkg.equals(requestedPkg)) {
+                                    args[0] = mClonePkg;
+                                }
+                            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                                    && args[0] instanceof android.content.pm.VersionedPackage) {
+                                android.content.pm.VersionedPackage vp = (android.content.pm.VersionedPackage) args[0];
+                                requestedPkg = vp.getPackageName();
+                                if (mOriginalPkg.equals(requestedPkg)) {
+                                    args[0] = new android.content.pm.VersionedPackage(mClonePkg, vp.getVersionCode());
+                                }
                             }
 
+                            if (requestedPkg != null) {
+                                boolean isTarget = mClonePkg.equals(requestedPkg) || mOriginalPkg.equals(requestedPkg);
+                                Object result = method.invoke(real, args);
+                                if (isTarget && result instanceof PackageInfo) {
+                                    patchPackageInfo((PackageInfo) result,
+                                            (mOriginalPkg.equals(requestedPkg) ? requestedPkg : mClonePkg));
+                                }
+                                return result;
+                            }
+                        }
+
+                        // 2. getApplicationInfo(String packageName, long|int flags, [int userId])
+                        if ("getApplicationInfo".equals(methodName) && args != null && args.length >= 1
+                                && args[0] instanceof String) {
+                            String requestedPkg = (String) args[0];
+                            boolean isTarget = mClonePkg.equals(requestedPkg) || mOriginalPkg.equals(requestedPkg);
+                            if (mOriginalPkg.equals(requestedPkg)) {
+                                args[0] = mClonePkg;
+                            }
                             Object result = method.invoke(real, args);
-                            if (isTarget && result instanceof PackageInfo) {
-                                patchPackageInfo((PackageInfo) result,
-                                        (mOriginalPkg.equals(requestedPkg) ? requestedPkg : mClonePkg));
+                            if (isTarget && result instanceof android.content.pm.ApplicationInfo) {
+                                android.content.pm.ApplicationInfo ai = (android.content.pm.ApplicationInfo) result;
+                                ai.packageName = mOriginalPkg;
+                                if (mClonePkg.equals(ai.processName)) {
+                                    ai.processName = mOriginalPkg;
+                                }
                             }
                             return result;
                         }
 
-                        // 2. Installer provenance: spoof Play Store (most common licence gate).
+                        // 3. getPackagesForUid(int uid) — ensure original package is reported for our UID
+                        if ("getPackagesForUid".equals(methodName)) {
+                            Object result = method.invoke(real, args);
+                            if (result instanceof String[]) {
+                                String[] pkgs = (String[]) result;
+                                boolean containsClone = false;
+                                for (String p : pkgs) {
+                                    if (mClonePkg.equals(p)) {
+                                        containsClone = true;
+                                        break;
+                                    }
+                                }
+                                if (containsClone) {
+                                    java.util.ArrayList<String> list = new java.util.ArrayList<>(java.util.Arrays.asList(pkgs));
+                                    if (!list.contains(mOriginalPkg)) {
+                                        list.add(0, mOriginalPkg);
+                                    }
+                                    return list.toArray(new String[0]);
+                                }
+                            }
+                            return result;
+                        }
+
+                        // 4. getNameForUid(int uid) — report original package name
+                        if ("getNameForUid".equals(methodName)) {
+                            Object result = method.invoke(real, args);
+                            if (mClonePkg.equals(result)) {
+                                return mOriginalPkg;
+                            }
+                            return result;
+                        }
+
+                        // 5. getPackageUid / getPackageGids
+                        if (("getPackageUid".equals(methodName) || "getPackageGids".equals(methodName))
+                                && args != null && args.length >= 1 && mOriginalPkg.equals(args[0])) {
+                            args[0] = mClonePkg;
+                            return method.invoke(real, args);
+                        }
+
+                        // 6. checkSignatures & checkUidSignatures — signature comparison returns SIGNATURE_MATCH (0)
+                        if (("checkSignatures".equals(methodName) || "checkUidSignatures".equals(methodName))
+                                && args != null && args.length >= 2) {
+                            if (args[0] instanceof String && args[1] instanceof String) {
+                                String p1 = (String) args[0];
+                                String p2 = (String) args[1];
+                                if ((mOriginalPkg.equals(p1) || mClonePkg.equals(p1))
+                                        && (mOriginalPkg.equals(p2) || mClonePkg.equals(p2))) {
+                                    return 0; // PackageManager.SIGNATURE_MATCH
+                                }
+                            } else if (args[0] instanceof Integer && args[1] instanceof Integer) {
+                                if (args[0].equals(args[1])) {
+                                    return 0; // PackageManager.SIGNATURE_MATCH
+                                }
+                            }
+                        }
+
+                        // 7. Component resolution: rewrite ComponentName package orig -> clone, and result clone -> orig
+                        if (("getActivityInfo".equals(methodName) || "getReceiverInfo".equals(methodName)
+                                || "getServiceInfo".equals(methodName) || "getProviderInfo".equals(methodName))
+                                && args != null && args.length >= 1 && args[0] instanceof android.content.ComponentName) {
+                            android.content.ComponentName cn = (android.content.ComponentName) args[0];
+                            boolean rewritten = false;
+                            if (mOriginalPkg.equals(cn.getPackageName())) {
+                                args[0] = new android.content.ComponentName(mClonePkg, cn.getClassName());
+                                rewritten = true;
+                            }
+                            Object result = method.invoke(real, args);
+                            if (result instanceof android.content.pm.ComponentInfo) {
+                                android.content.pm.ComponentInfo ci = (android.content.pm.ComponentInfo) result;
+                                if (rewritten || mClonePkg.equals(ci.packageName)) {
+                                    ci.packageName = mOriginalPkg;
+                                    if (ci.applicationInfo != null) {
+                                        ci.applicationInfo.packageName = mOriginalPkg;
+                                    }
+                                }
+                            }
+                            return result;
+                        }
+
+                        // 8. Intent resolution on PackageManager
+                        if (("resolveIntent".equals(methodName) || "queryIntentActivities".equals(methodName)
+                                || "queryIntentServices".equals(methodName) || "queryIntentReceivers".equals(methodName)
+                                || "queryIntentContentProviders".equals(methodName))
+                                && args != null && args.length >= 1 && args[0] instanceof android.content.Intent) {
+                            android.content.Intent intent = (android.content.Intent) args[0];
+                            android.content.ComponentName cn = intent.getComponent();
+                            if (cn != null && mOriginalPkg.equals(cn.getPackageName())) {
+                                intent.setClassName(mClonePkg, cn.getClassName());
+                            }
+                            if (mOriginalPkg.equals(intent.getPackage())) {
+                                intent.setPackage(mClonePkg);
+                            }
+                            Object result = method.invoke(real, args);
+                            patchIntentResult(result);
+                            return result;
+                        }
+
+                        // 9. Installer provenance: spoof Play Store (most common licence gate).
                         if ("getInstallerPackageName".equals(methodName)) {
                             return "com.android.vending";
                         }
 
-                        // 3. getInstallSourceInfo (API 30+, several shapes on 30/33+)
+                        // 10. getInstallSourceInfo (API 30+, several shapes on 30/33+)
                         if ("getInstallSourceInfo".equals(methodName)) {
+                            if (args != null && args.length >= 1 && mOriginalPkg.equals(args[0])) {
+                                args[0] = mClonePkg;
+                            }
                             Object result = method.invoke(real, args);
                             return spoofInstallSourceInfo(result);
                         }
 
-                        // 4. hasSigningCertificate(String pkg, byte[] cert, int type) and
-                        //    hasSigningCertificate(int uid, byte[] cert, int type)
+                        // 11. hasSigningCertificate(String pkg, byte[] cert, int type) and
+                        //     hasSigningCertificate(int uid, byte[] cert, int type)
                         if ("hasSigningCertificate".equals(methodName) && args != null && args.length >= 2) {
                             if (args[0] instanceof String) {
                                 String pkg = (String) args[0];
                                 if (mClonePkg.equals(pkg) || mOriginalPkg.equals(pkg)) {
+                                    return Boolean.TRUE;
+                                }
+                            } else if (args[0] instanceof Integer) {
+                                int uid = (Integer) args[0];
+                                if (uid == android.os.Process.myUid()) {
                                     return Boolean.TRUE;
                                 }
                             }
@@ -139,6 +272,9 @@ public final class SignatureSpoofHook {
             pkgInfo.packageName = mOriginalPkg;
             if (pkgInfo.applicationInfo != null) {
                 pkgInfo.applicationInfo.packageName = mOriginalPkg;
+                if (mClonePkg.equals(pkgInfo.applicationInfo.processName)) {
+                    pkgInfo.applicationInfo.processName = mOriginalPkg;
+                }
             }
         }
 
@@ -237,5 +373,45 @@ public final class SignatureSpoofHook {
             Log.w(TAG, "InstallSourceInfo spoof degraded: " + t.getMessage());
         }
         return originalInfo;
+    }
+
+    private void patchIntentResult(Object result) {
+        if (result == null) return;
+        if (result instanceof android.content.pm.ResolveInfo) {
+            patchResolveInfo((android.content.pm.ResolveInfo) result);
+        } else if (result instanceof java.util.List) {
+            for (Object item : (java.util.List<?>) result) {
+                if (item instanceof android.content.pm.ResolveInfo) {
+                    patchResolveInfo((android.content.pm.ResolveInfo) item);
+                }
+            }
+        } else {
+            // Handle ParceledListSlice
+            try {
+                Method getList = result.getClass().getMethod("getList");
+                getList.setAccessible(true);
+                Object list = getList.invoke(result);
+                if (list instanceof java.util.List) {
+                    for (Object item : (java.util.List<?>) list) {
+                        if (item instanceof android.content.pm.ResolveInfo) {
+                            patchResolveInfo((android.content.pm.ResolveInfo) item);
+                        }
+                    }
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    private void patchResolveInfo(android.content.pm.ResolveInfo ri) {
+        if (ri == null) return;
+        android.content.pm.ComponentInfo ci = ri.activityInfo != null ? ri.activityInfo :
+                (ri.serviceInfo != null ? ri.serviceInfo : ri.providerInfo);
+        if (ci != null && (mClonePkg.equals(ci.packageName) || mOriginalPkg.equals(ci.packageName))) {
+            ci.packageName = mOriginalPkg;
+            if (ci.applicationInfo != null) {
+                ci.applicationInfo.packageName = mOriginalPkg;
+            }
+        }
     }
 }

@@ -62,7 +62,7 @@ public class CFComponentFactory extends AppComponentFactory {
      * instantiated on {@code cl}. On any failure falls back to the platform default behavior.
      */
     private synchronized AppComponentFactory getDelegate(ClassLoader cl) {
-        if (mDelegateFactory != null) {
+        if (mDelegateFactory != null && mDelegateFactory != mDefaultFactory) {
             return mDelegateFactory;
         }
         try {
@@ -72,6 +72,8 @@ public class CFComponentFactory extends AppComponentFactory {
                 try {
                     Class<?> clazz = cl.loadClass(origFactoryName);
                     mDelegateFactory = (AppComponentFactory) clazz.getDeclaredConstructor().newInstance();
+                    Log.i(TAG, "Instantiated delegate AppComponentFactory: " + origFactoryName);
+                    return mDelegateFactory;
                 } catch (Throwable t) {
                     Log.w(TAG, "Could not instantiate delegate AppComponentFactory: " + origFactoryName, t);
                 }
@@ -88,6 +90,8 @@ public class CFComponentFactory extends AppComponentFactory {
     @Override
     public ClassLoader instantiateClassLoader(ClassLoader cl, ApplicationInfo aInfo) {
         try {
+            // Step 0: Lift hidden API restrictions so reflection/JNI into ART internals succeeds.
+            HiddenApiBypass.addHiddenApiExemptions("L");
             // Must run first: parses config.json + meta-data and warms static state.
             CloneRuntimeEngine.preloadFromApplicationInfo(aInfo);
             ensureRuntimeInitialized(cl);

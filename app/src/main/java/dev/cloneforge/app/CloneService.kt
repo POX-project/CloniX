@@ -21,6 +21,7 @@ import java.util.concurrent.atomic.AtomicInteger
 /**
  * Foreground service (dataSync) that drives [CloneForgePipeline] for every
  * clone index the user requested and reports progress through [CloneBus].
+ * Supports batch cloning across multiple apps sequentially.
  */
 class CloneService : LifecycleService() {
 
@@ -30,60 +31,98 @@ class CloneService : LifecycleService() {
         super.onStartCommand(intent, flags, startId)
         CloneForgeApp.ensureChannels(this)
 
-        val target = intent?.getStringExtra(EXTRA_TARGET_PACKAGE)
-        if (target.isNullOrBlank()) {
+        val targets: ArrayList<String> = intent?.getStringArrayListExtra(EXTRA_TARGET_PACKAGES)
+            ?: intent?.getStringExtra(EXTRA_TARGET_PACKAGE)?.let { arrayListOf(it) }
+            ?: arrayListOf()
+
+        if (targets.isEmpty()) {
             stopSelfResult(startId)
             return START_NOT_STICKY
         }
 
-        val labelPrefix = intent.getStringExtra(EXTRA_APP_LABEL)?.takeIf { it.isNotBlank() }
-            ?: defaultLabel(target)
-        val cloneCount = intent.getIntExtra(EXTRA_CLONE_COUNT, 1).coerceIn(1, MAX_CLONES)
-        val hueEnabled = intent.getBooleanExtra(EXTRA_HUE_ENABLED, false)
-        val silent = intent.getBooleanExtra(EXTRA_SILENT, false)
+        val labelPrefix = intent?.getStringExtra(EXTRA_APP_LABEL)?.takeIf { it.isNotBlank() }
+        val cloneCount = intent?.getIntExtra(EXTRA_CLONE_COUNT, 1)?.coerceAtLeast(1) ?: 1
+        val addNumberName = intent?.getBooleanExtra(EXTRA_ADD_NUMBER_NAME, true) ?: true
+        val addNumberIcon = intent?.getBooleanExtra(EXTRA_ADD_NUMBER_ICON, true) ?: true
+        val hueEnabled = intent?.getBooleanExtra(EXTRA_HUE_ENABLED, true) ?: true
+        val rootInstall = intent?.getBooleanExtra(EXTRA_ROOT_INSTALL, false) ?: false
+        val silent = intent?.getBooleanExtra(EXTRA_SILENT, false) ?: false
 
         goForeground()
         lifecycleScope.launch(Dispatchers.IO) {
-            runClones(startId, target, labelPrefix, cloneCount, hueEnabled, silent)
+            runClones(
+                startId = startId,
+                targetPackages = targets,
+                labelPrefix = labelPrefix,
+                cloneCount = cloneCount,
+                addNumberName = addNumberName,
+                addNumberIcon = addNumberIcon,
+                hueEnabled = hueEnabled,
+                rootInstall = rootInstall,
+                silent = silent
+            )
         }
         return START_NOT_STICKY
     }
 
     private suspend fun runClones(
         startId: Int,
-        targetPackage: String,
-        labelPrefix: String,
+        targetPackages: List<String>,
+        labelPrefix: String?,
         cloneCount: Int,
+        addNumberName: Boolean,
+        addNumberIcon: Boolean,
         hueEnabled: Boolean,
+        rootInstall: Boolean,
         silent: Boolean
     ) {
         val history = CloneHistoryStore(this)
+        val totalApps = targetPackages.size
         try {
-            for (index in 1..cloneCount) {
-                runCatching {
-                    buildOneClone(history, targetPackage, labelPrefix, index, cloneCount, hueEnabled, silent)
-                }.onFailure { t ->
-                    Log.e(TAG, "clone #$index of $targetPackage crashed", t)
-                    CloneBus.post(
-                        CloneBus.CloneProgressEvent(
+            for ((pkgIdx, targetPackage) in targetPackages.withIndex()) {
+                val effectivePrefix = if (totalApps == 1 && !labelPrefix.isNullOrBlank()) {
+                    labelPrefix
+                } else {
+                    defaultLabel(targetPackage)
+                }
+
+                for (index in 1..cloneCount) {
+                    runCatching {
+                        buildOneClone(
+                            history = history,
                             targetPackage = targetPackage,
-                            labelPrefix = labelPrefix,
-                            cloneIndex = index,
-                            totalClones = cloneCount,
-                            percent = -1,
-                            message = t.message ?: getString(R.string.notif_install_failed_generic),
-                            finished = true,
-                            success = false,
-                            mutatedPackage = null,
-                            sessionId = -1
+                            labelPrefix = effectivePrefix,
+                            index = index,
+                            cloneCount = cloneCount,
+                            appIndex = pkgIdx + 1,
+                            totalApps = totalApps,
+                            addNumberName = addNumberName,
+                            addNumberIcon = addNumberIcon,
+                            hueEnabled = hueEnabled,
+                            rootInstall = rootInstall,
+                            silent = silent
                         )
-                    )
+                    }.onFailure { t ->
+                        Log.e(TAG, "clone #$index of $targetPackage crashed", t)
+                        CloneBus.post(
+                            CloneBus.CloneProgressEvent(
+                                targetPackage = targetPackage,
+                                labelPrefix = effectivePrefix,
+                                cloneIndex = index,
+                                totalClones = cloneCount,
+                                percent = -1,
+                                message = t.message ?: getString(R.string.notif_install_failed_generic),
+                                finished = true,
+                                success = false,
+                                mutatedPackage = null,
+                                sessionId = -1
+                            )
+                        )
+                    }
                 }
             }
         } finally {
             withContext(Dispatchers.Main.immediate) {
-                // stopSelfResult returns false if a newer startId arrived or the
-                // service was already stopped (e.g. user task removed) — either is fine.
                 stopSelfResult(startId)
             }
         }
@@ -95,12 +134,19 @@ class CloneService : LifecycleService() {
         labelPrefix: String,
         index: Int,
         cloneCount: Int,
+        appIndex: Int,
+        totalApps: Int,
+        addNumberName: Boolean,
+        addNumberIcon: Boolean,
         hueEnabled: Boolean,
+        rootInstall: Boolean,
         silent: Boolean
     ) {
-        val contentLabel = "$labelPrefix #$index"
-        // "Auto hue" mode: every clone gets a distinct icon hue, 120 degrees apart.
-        val hueShiftDeg = if (hueEnabled) (HUE_STEP_DEG * index) % 360f else 0f
+        val contentLabel = if (addNumberName) "$labelPrefix #$index" else labelPrefix
+        val badgeText = if (addNumberIcon) "#$index" else null
+        val hueShiftDeg = if (hueEnabled) ((index * 137.5f) % 360f) else 0f
+
+        val appTag = if (totalApps > 1) "[$appIndex/$totalApps] " else ""
 
         val pipeline = CloneForgePipeline(applicationContext) { percent, message ->
             val pct = percent.coerceIn(0, 100)
@@ -110,13 +156,13 @@ class CloneService : LifecycleService() {
                 cloneIndex = index,
                 totalClones = cloneCount,
                 percent = pct,
-                message = message,
+                message = "$appTag$message",
                 finished = false,
                 success = false,
                 mutatedPackage = null,
                 sessionId = -1
             ))
-            updateProgressNotification(pct, contentLabel, message, index, cloneCount)
+            updateProgressNotification(pct, contentLabel, message, index, cloneCount, appIndex, totalApps)
         }
 
         CloneBus.post(CloneBus.CloneProgressEvent(
@@ -125,14 +171,22 @@ class CloneService : LifecycleService() {
             cloneIndex = index,
             totalClones = cloneCount,
             percent = 0,
-            message = getString(R.string.clone_step_starting),
+            message = "$appTag${getString(R.string.clone_step_starting)}",
             finished = false,
             success = false,
             mutatedPackage = null,
             sessionId = -1
         ))
 
-        val result: CloneResult = pipeline.buildAndInstall(targetPackage, index, labelPrefix, hueShiftDeg, silent)
+        val result: CloneResult = pipeline.buildAndInstall(
+            targetPackage = targetPackage,
+            cloneIndex = index,
+            appLabel = contentLabel,
+            hueShiftDeg = hueShiftDeg,
+            silent = silent,
+            badgeEnabled = addNumberIcon,
+            useRoot = rootInstall
+        )
         withContext(Dispatchers.Main.immediate) {
             CloneBus.post(CloneBus.CloneProgressEvent(
                 targetPackage = targetPackage,
@@ -140,11 +194,12 @@ class CloneService : LifecycleService() {
                 cloneIndex = index,
                 totalClones = cloneCount,
                 percent = 100,
-                message = result.message,
+                message = "$appTag${result.message}",
                 finished = true,
                 success = result.success,
                 mutatedPackage = result.mutatedPackage,
-                sessionId = result.sessionId
+                sessionId = result.sessionId,
+                apkPath = result.apkPath
             ))
 
             if (result.success) {
@@ -152,7 +207,8 @@ class CloneService : LifecycleService() {
                 history.addClone(
                     originalPackage = targetPackage,
                     clonePackage = mutated,
-                    cloneLabel = contentLabel
+                    cloneLabel = contentLabel,
+                    apkPath = result.apkPath.orEmpty()
                 )
                 notifyCompletion(
                     notificationId = completionId(result.sessionId, index),
@@ -194,14 +250,27 @@ class CloneService : LifecycleService() {
         contentLabel: String,
         message: String,
         index: Int,
-        cloneCount: Int
+        cloneCount: Int,
+        appIndex: Int,
+        totalApps: Int
     ) {
-        val notification = NotificationFactory(this).build(
-            title = getString(R.string.notif_clone_running_title),
-            text = getString(
+        val title = if (totalApps > 1) {
+            "Batch Cloning ($appIndex of $totalApps apps)"
+        } else {
+            getString(R.string.notif_clone_running_title)
+        }
+        val subtitle = if (cloneCount > 1) {
+            getString(
                 R.string.notif_clone_progress_arg,
                 index, cloneCount, contentLabel
-            ) + " · " + message,
+            ) + " · " + message
+        } else {
+            "$contentLabel · $message"
+        }
+
+        val notification = NotificationFactory(this).build(
+            title = title,
+            text = subtitle,
             channel = CloneForgeApp.CHANNEL_CLONE_JOBS,
             ongoing = true,
             progress = percent.coerceIn(0, 100)
@@ -228,13 +297,15 @@ class CloneService : LifecycleService() {
 
         // Extras sent by MainActivity.
         const val EXTRA_TARGET_PACKAGE = "dev.cloneforge.EXTRA_TARGET_PACKAGE"
+        const val EXTRA_TARGET_PACKAGES = "dev.cloneforge.EXTRA_TARGET_PACKAGES"
         const val EXTRA_APP_LABEL = "dev.cloneforge.EXTRA_APP_LABEL"
         const val EXTRA_CLONE_COUNT = "dev.cloneforge.EXTRA_CLONE_COUNT"
+        const val EXTRA_ADD_NUMBER_NAME = "dev.cloneforge.EXTRA_ADD_NUMBER_NAME"
+        const val EXTRA_ADD_NUMBER_ICON = "dev.cloneforge.EXTRA_ADD_NUMBER_ICON"
         const val EXTRA_HUE_ENABLED = "dev.cloneforge.EXTRA_HUE_ENABLED"
+        const val EXTRA_BADGE_ENABLED = "dev.cloneforge.EXTRA_BADGE_ENABLED"
+        const val EXTRA_ROOT_INSTALL = "dev.cloneforge.EXTRA_ROOT_INSTALL"
         const val EXTRA_SILENT = "dev.cloneforge.EXTRA_SILENT"
-
-        const val MAX_CLONES = 5
-        const val HUE_STEP_DEG = 120f
 
         const val NOTIF_PROGRESS_ID = 2001
 
