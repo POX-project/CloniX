@@ -196,6 +196,10 @@ public final class CloneRuntimeEngine {
         return Collections.unmodifiableMap(sConfig.permissionMap);
     }
 
+    public static Map<String, String> getAccountTypeMap() {
+        return Collections.unmodifiableMap(sConfig.accountTypeMap);
+    }
+
     public static String getApkPath() {
         return sApkPath;
     }
@@ -293,6 +297,7 @@ public final class CloneRuntimeEngine {
             merged.origFactory = parsed.origFactory;
             merged.authorityMap = new HashMap<>(parsed.authorityMap);
             merged.permissionMap = new HashMap<>(parsed.permissionMap);
+            merged.accountTypeMap = new HashMap<>(parsed.accountTypeMap);
 
             if ((sOrigApplicationClass == null || sOrigApplicationClass.isEmpty())
                     && parsed.origApplication != null && !parsed.origApplication.isEmpty()) {
@@ -380,6 +385,16 @@ public final class CloneRuntimeEngine {
             Log.i(TAG, "DeviceIdentityHook installed");
         } catch (Throwable t) {
             Log.e(TAG, "DeviceIdentityHook install failed (degraded)", t);
+        }
+
+        // 9. AccountAuthenticator & SyncAdapter XML isolation (Spec §8).
+        try {
+            dev.cloneforge.runtime.hooks.AccountManagerHook.install(
+                    sConfig.origPkg, sConfig.clonePkg, sConfig.cloneSuffix,
+                    sConfig.accountTypeMap, sConfig.authorityMap);
+            Log.i(TAG, "AccountManagerHook installed");
+        } catch (Throwable t) {
+            Log.e(TAG, "AccountManagerHook install failed (degraded)", t);
         }
     }
 

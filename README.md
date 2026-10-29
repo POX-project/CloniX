@@ -41,6 +41,7 @@ The payload dex executes before `Application.attachBaseContext()` via `AppCompon
 | `ProviderUriHook` | `content://` authority translation table so providers/FileProvider survive re-authority |
 | `PackageNameRouter` | stack-aware `getPackageName()` — system Binder calls get the clone package, app-level checks get the original |
 | `DeviceIdentityHook` | per-clone persistent synthetic `ANDROID_ID`, Widevine ID, GAID, IMEI, ICCID, MAC |
+| `AccountManagerHook` | isolates `AccountAuthenticator` & `SyncAdapter` XMLs and proxies AccountManager/ContentResolver queries without system account collisions |
 | Native `libcloneforge_core.so` | `openat/faccessat/fstatat64` (PLT/Symbol hook via ShadowHook): pristine original APK served to integrity checkers, hardcoded `/data/data/<orig>` paths redirected, `/proc/self/maps` scrubbed through a filtered `memfd` |
 
 ## Modules
@@ -92,8 +93,8 @@ gh secret set CF_KEY_PASS    -R OWNER/CloniX
 ## Roadmap
 - ✅ LSPlant-based ART hooks (package router, device-identity spoofing, ContentResolver/FileProvider
   interception) — active since v1.1.0 via the shadowhook-backed C++ bridge in `native-bridge`.
+- ✅ Account-authenticator & SyncAdapter XML rewriting and runtime virtualization (spec §8).
 - Shizuku/ADB silent installer bridge (`USER_ACTION_NOT_REQUIRED` without being a device owner).
-- Account-authenticator XML rewriting (spec §8).
 
 ## Language & contributing
 PRs welcome. For design changes, please open an issue first so the architecture direction is

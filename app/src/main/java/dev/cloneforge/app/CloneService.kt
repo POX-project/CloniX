@@ -30,12 +30,19 @@ class CloneService : LifecycleService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
         CloneForgeApp.ensureChannels(this)
+        goForeground()
 
         val targets: ArrayList<String> = intent?.getStringArrayListExtra(EXTRA_TARGET_PACKAGES)
             ?: intent?.getStringExtra(EXTRA_TARGET_PACKAGE)?.let { arrayListOf(it) }
             ?: arrayListOf()
 
         if (targets.isEmpty()) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
             stopSelfResult(startId)
             return START_NOT_STICKY
         }
@@ -48,7 +55,6 @@ class CloneService : LifecycleService() {
         val rootInstall = intent?.getBooleanExtra(EXTRA_ROOT_INSTALL, false) ?: false
         val silent = intent?.getBooleanExtra(EXTRA_SILENT, false) ?: false
 
-        goForeground()
         lifecycleScope.launch(Dispatchers.IO) {
             runClones(
                 startId = startId,

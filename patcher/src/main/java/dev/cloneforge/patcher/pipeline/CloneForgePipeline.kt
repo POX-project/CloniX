@@ -97,6 +97,7 @@ class CloneForgePipeline(
             )
             val authorityMap = mutation.authorityMap.toMutableMap()
             val permissionMap = mutation.permissionMap.toMutableMap()
+            val accountTypeMap = mutation.accountTypeMap.toMutableMap()
 
             // Splits are only touched at the manifest level; their ZIP entries
             // otherwise stay untouched.
@@ -107,7 +108,8 @@ class CloneForgePipeline(
                     clonePkg = mutatedPackage,
                     cloneSuffix = cloneSuffix,
                     authorityMap = authorityMap,
-                    permissionMap = permissionMap
+                    permissionMap = permissionMap,
+                    accountTypeMap = accountTypeMap
                 )
             }
 
@@ -120,7 +122,7 @@ class CloneForgePipeline(
             val configJson = buildConfigJson(
                 bundle.originalPackageName, mutatedPackage, cloneSuffix,
                 mutation.originalApplicationClass, mutation.originalAppComponentFactory,
-                authorityMap, permissionMap, payloadDir
+                authorityMap, permissionMap, accountTypeMap, payloadDir
             )
             val originCert = File(payloadDir, "origin_cert.der")
             originCert.outputStream().use { output -> output.write(bundle.originalCertDer) }
@@ -273,12 +275,15 @@ class CloneForgePipeline(
         origFactory: String?,
         authorityMap: Map<String, String>,
         permissionMap: Map<String, String>,
+        accountTypeMap: Map<String, String>,
         payloadDir: File,
     ): File {
         val authorityJson = JSONObject()
         for ((k, v) in authorityMap) authorityJson.put(k, v)
         val permissionJson = JSONObject()
         for ((k, v) in permissionMap) permissionJson.put(k, v)
+        val accountTypeJson = JSONObject()
+        for ((k, v) in accountTypeMap) accountTypeJson.put(k, v)
         val config = JSONObject()
             .put("engine_version", CfConstants.ENGINE_VERSION)
             .put("orig_pkg", origPkg)
@@ -288,6 +293,7 @@ class CloneForgePipeline(
             .put("orig_factory", origFactory.orEmpty())
             .put("authority_map", authorityJson)
             .put("permission_map", permissionJson)
+            .put("account_type_map", accountTypeJson)
         val outFile = File(payloadDir, "config.json")
         outFile.parentFile?.mkdirs()
         outFile.writeText(config.toString(), Charsets.UTF_8)

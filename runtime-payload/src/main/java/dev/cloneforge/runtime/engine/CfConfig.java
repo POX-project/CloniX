@@ -30,6 +30,7 @@ public final class CfConfig {
     public String origFactory = "";
     public Map<String, String> authorityMap = new HashMap<>();
     public Map<String, String> permissionMap = new HashMap<>();
+    public Map<String, String> accountTypeMap = new HashMap<>();
 
     public CfConfig() {
     }
@@ -61,6 +62,8 @@ public final class CfConfig {
                     cfg.authorityMap = readStringMap(reader);
                 } else if ("permission_map".equals(name)) {
                     cfg.permissionMap = readStringMap(reader);
+                } else if ("account_type_map".equals(name)) {
+                    cfg.accountTypeMap = readStringMap(reader);
                 } else {
                     reader.skipValue();
                 }

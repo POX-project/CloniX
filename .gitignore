@@ -11,3 +11,4 @@ build/
 local.properties
 app/src/main/assets/cloneforge/runtime-payload.dex
 app/src/main/assets/cloneforge/native/
+.kotlin/

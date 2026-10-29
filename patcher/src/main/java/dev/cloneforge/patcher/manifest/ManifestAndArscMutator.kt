@@ -1,8 +1,11 @@
 package dev.cloneforge.patcher.manifest
 
 import com.reandroid.apk.ApkModule
+import com.reandroid.archive.BlockInputSource
+import com.reandroid.archive.InputSource
 import com.reandroid.arsc.chunk.xml.AndroidManifestBlock
 import com.reandroid.arsc.chunk.xml.ResXmlAttribute
+import com.reandroid.arsc.chunk.xml.ResXmlDocument
 import com.reandroid.arsc.chunk.xml.ResXmlElement
 import com.reandroid.arsc.value.ValueType
 import com.reandroid.utils.collection.CollectionUtil
@@ -19,7 +22,8 @@ data class MutationResult(
     val originalApplicationClass: String?,
     val originalAppComponentFactory: String?,
     val authorityMap: Map<String, String>,
-    val permissionMap: Map<String, String>
+    val permissionMap: Map<String, String>,
+    val accountTypeMap: Map<String, String> = emptyMap()
 )
 
 /**
@@ -50,6 +54,9 @@ class ManifestAndArscMutator {
         private const val ATTR_TARGET_ACTIVITY = 0x01010202
         private const val ATTR_APP_COMPONENT_FACTORY = 0x0101057a
         private const val ATTR_EXTRACT_NATIVE_LIBS = 0x010104ea
+        private const val ATTR_ACCOUNT_TYPE = 0x0101028f
+        private const val ATTR_CONTENT_AUTHORITY = 0x01010290
+        private const val ATTR_SEARCH_SUGGEST_AUTHORITY = 0x010101d6
 
         private const val TAG_APPLICATION = "application"
         private const val TAG_META_DATA = "meta-data"
@@ -59,10 +66,16 @@ class ManifestAndArscMutator {
         private const val TAG_PERMISSION_TREE = "permission-tree"
         private const val TAG_USES_PERMISSION = "uses-permission"
         private const val TAG_USES_PERMISSION_SDK_23 = "uses-permission-sdk-23"
+        private const val TAG_ACCOUNT_AUTHENTICATOR = "account-authenticator"
+        private const val TAG_SYNC_ADAPTER = "sync-adapter"
+        private const val TAG_SEARCHABLE = "searchable"
 
         private const val NAME_SHARED_USER_ID = "sharedUserId"
         private const val NAME_SHARED_USER_LABEL = "sharedUserLabel"
         private const val NAME_SHARED_USER_MAX_SDK_VERSION = "sharedUserMaxSdkVersion"
+        private const val NAME_ACCOUNT_TYPE = "accountType"
+        private const val NAME_CONTENT_AUTHORITY = "contentAuthority"
+        private const val NAME_SEARCH_SUGGEST_AUTHORITY = "searchSuggestAuthority"
 
         private const val COMPONENT_TAGS = "activity.service.receiver.provider."
         private val COMPONENT_TAG_LIST =
@@ -90,6 +103,7 @@ class ManifestAndArscMutator {
 
         val authorityMap = linkedMapOf<String, String>()
         val permissionMap = linkedMapOf<String, String>()
+        val accountTypeMap = linkedMapOf<String, String>()
 
         // 1. Strip sharedUserId / sharedUserLabel / sharedUserMaxSdkVersion from <manifest>.
         // Leaving sharedUserId causes INSTALL_FAILED_SHARED_USER_INCOMPATIBLE.
@@ -211,6 +225,9 @@ class ManifestAndArscMutator {
         // 8. Patch the app label and launcher activity labels.
         patchApplicationAndLauncherLabels(appElement, customAppLabel)
 
+        // 9. Mutate account-authenticator, sync-adapter, and searchable XML resources (spec §8).
+        mutateResXmlFiles(apkModule, origPkg, cloneSuffix, authorityMap, accountTypeMap)
+
         writeApkSafe(apkModule, baseApkFile)
 
         return MutationResult(
@@ -219,7 +236,8 @@ class ManifestAndArscMutator {
             originalApplicationClass = expandedOrigAppClass,
             originalAppComponentFactory = expandedOrigFactory,
             authorityMap = authorityMap,
-            permissionMap = permissionMap
+            permissionMap = permissionMap,
+            accountTypeMap = accountTypeMap
         )
     }
 
@@ -235,6 +253,7 @@ class ManifestAndArscMutator {
         cloneSuffix: String,
         authorityMap: MutableMap<String, String> = linkedMapOf(),
         permissionMap: MutableMap<String, String> = linkedMapOf(),
+        accountTypeMap: MutableMap<String, String> = linkedMapOf(),
     ) {
         val splitModule = ApkModule.loadApkFile(splitApkFile)
         splitModule.setLoadDefaultFramework(false)
@@ -272,6 +291,8 @@ class ManifestAndArscMutator {
                 mutateComponentPermissions(comp, origPkg, cloneSuffix, permissionMap)
             }
         }
+
+        mutateResXmlFiles(splitModule, origPkg, cloneSuffix, authorityMap, accountTypeMap)
 
         writeApkSafe(splitModule, splitApkFile)
     }
@@ -415,6 +436,96 @@ class ManifestAndArscMutator {
             }
         } finally {
             if (tmp.exists()) tmp.delete()
+        }
+    }
+
+    /**
+     * Scans and mutates system-bound XML resources under res/xml* (spec §8):
+     *  - <account-authenticator>: rewrites android:accountType with cloneSuffix
+     *  - <sync-adapter>: rewrites android:accountType and android:contentAuthority
+     *  - <searchable>: rewrites android:searchSuggestAuthority
+     *
+     * Saves updated binary XML documents directly into the ApkModule's ZipEntryMap.
+     */
+    private fun mutateResXmlFiles(
+        apkModule: ApkModule,
+        origPkg: String,
+        cloneSuffix: String,
+        authorityMap: MutableMap<String, String>,
+        accountTypeMap: MutableMap<String, String>
+    ) {
+        val zipMap = apkModule.zipEntryMap ?: return
+        val candidates = ArrayList<InputSource>()
+        for (entry in zipMap) {
+            val name = entry.name ?: continue
+            if (name.startsWith("res/") && name.endsWith(".xml") && name != "AndroidManifest.xml") {
+                candidates.add(entry)
+            }
+        }
+
+        for (entry in candidates) {
+            try {
+                if (!ResXmlDocument.isResXmlBlock(entry)) continue
+                val doc = apkModule.loadResXmlDocument(entry) ?: continue
+                val root = doc.documentElement ?: continue
+                var modified = false
+
+                val elementsToInspect = ArrayList<ResXmlElement>()
+                elementsToInspect.add(root)
+                val iter = root.recursiveElements()
+                while (iter.hasNext()) {
+                    val child = iter.next()
+                    if (child is ResXmlElement) {
+                        elementsToInspect.add(child)
+                    }
+                }
+
+                for (el in elementsToInspect) {
+                    if (el.equalsName(TAG_ACCOUNT_AUTHENTICATOR) || el.equalsName(TAG_SYNC_ADAPTER)) {
+                        val typeAttr = el.searchAttributeByResourceId(ATTR_ACCOUNT_TYPE)
+                            ?: el.searchAttributeByName(NAME_ACCOUNT_TYPE)
+                        val oldType = typeAttr?.valueAsString
+                        if (!oldType.isNullOrBlank()) {
+                            val newType = if (oldType.contains(cloneSuffix)) oldType else "$oldType.$cloneSuffix"
+                            accountTypeMap[oldType] = newType
+                            typeAttr.setValueAsString(newType)
+                            modified = true
+                        }
+                    }
+
+                    if (el.equalsName(TAG_SYNC_ADAPTER)) {
+                        val authAttr = el.searchAttributeByResourceId(ATTR_CONTENT_AUTHORITY)
+                            ?: el.searchAttributeByName(NAME_CONTENT_AUTHORITY)
+                        val oldAuth = authAttr?.valueAsString
+                        if (!oldAuth.isNullOrBlank()) {
+                            val newAuth = authorityMap[oldAuth]
+                                ?: if (oldAuth.contains(cloneSuffix)) oldAuth else "$oldAuth.$cloneSuffix"
+                            authorityMap[oldAuth] = newAuth
+                            authAttr.setValueAsString(newAuth)
+                            modified = true
+                        }
+                    }
+
+                    if (el.equalsName(TAG_SEARCHABLE)) {
+                        val authAttr = el.searchAttributeByResourceId(ATTR_SEARCH_SUGGEST_AUTHORITY)
+                            ?: el.searchAttributeByName(NAME_SEARCH_SUGGEST_AUTHORITY)
+                        val oldAuth = authAttr?.valueAsString
+                        if (!oldAuth.isNullOrBlank()) {
+                            val newAuth = authorityMap[oldAuth]
+                                ?: if (oldAuth.contains(cloneSuffix)) oldAuth else "$oldAuth.$cloneSuffix"
+                            authorityMap[oldAuth] = newAuth
+                            authAttr.setValueAsString(newAuth)
+                            modified = true
+                        }
+                    }
+                }
+
+                if (modified) {
+                    zipMap.add(BlockInputSource(entry, doc))
+                }
+            } catch (_: Throwable) {
+                // Defensive: skip any corrupted or non-standard res/xml entry
+            }
         }
     }
 }
