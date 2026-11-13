@@ -65,6 +65,9 @@ jobs:
             printf 'CF_KEYSTORE_FILE=%s\n' /tmp/cf-release.keystore
           } >> "$env_file"
 
+      - name: Run unit tests
+        run: gradle :app:testReleaseUnitTest --stacktrace
+
       - name: Build app APK
         run: gradle :app:assembleRelease -x lint --stacktrace
 

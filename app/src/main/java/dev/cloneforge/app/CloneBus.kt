@@ -35,7 +35,7 @@ object CloneBus {
         extraBufferCapacity = 64
     )
 
-    /** Hot stream of progress/finish events; late collectors get the last 4 events. */
+    /** Hot stream of progress/finish events. */
     val events: SharedFlow<CloneProgressEvent> = _events
 
     private val _latest = MutableStateFlow<CloneProgressEvent?>(null)
