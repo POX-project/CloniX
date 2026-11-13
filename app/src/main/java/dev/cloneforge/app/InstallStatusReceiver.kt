@@ -9,6 +9,8 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.IntentCompat
+import dev.cloneforge.patcher.CfConstants
+import java.io.File
 
 /**
  * Manifest-declared receiver used as the target of the PackageInstaller
@@ -27,8 +29,18 @@ class InstallStatusReceiver : BroadcastReceiver() {
         CloneForgeApp.ensureChannels(pkgContext)
         val notifications = NotificationManagerCompat.from(pkgContext)
 
-        val sessionId = intent.getIntExtra(EXTRA_SESSION_ID, -1)
-        val appLabel = intent.getStringExtra(EXTRA_SESSION_LABEL).orEmpty()
+        val sessionId = intent.getIntExtra(CfConstants.EXTRA_SESSION_ID, -1)
+            .takeIf { it != -1 } ?: intent.getIntExtra(EXTRA_SESSION_ID, -1)
+        val appLabel = intent.getStringExtra(CfConstants.EXTRA_SESSION_LABEL)
+            ?: intent.getStringExtra(EXTRA_SESSION_LABEL).orEmpty()
+        val targetPackage = intent.getStringExtra(CfConstants.EXTRA_TARGET_PACKAGE)
+            ?: intent.getStringExtra(EXTRA_TARGET_PACKAGE).orEmpty()
+        val mutatedPackage = intent.getStringExtra(CfConstants.EXTRA_MUTATED_PACKAGE)
+            ?: intent.getStringExtra(PackageInstaller.EXTRA_PACKAGE_NAME)
+            ?: intent.getStringExtra(PackageInstaller.EXTRA_OTHER_PACKAGE_NAME)
+        val apkPath = intent.getStringExtra(CfConstants.EXTRA_APK_PATH).orEmpty()
+        val displayLabel = appLabel.ifBlank { mutatedPackage.orEmpty() }
+
         val notifId = if (sessionId > 0) 5000 + sessionId % 10_000 else ID_FALLBACK
 
         when (intent.getIntExtra(PackageInstaller.EXTRA_STATUS, Int.MIN_VALUE)) {
@@ -51,7 +63,7 @@ class InstallStatusReceiver : BroadcastReceiver() {
                     NotificationCompat.Builder(pkgContext, CloneForgeApp.CHANNEL_INSTALL_JOBS)
                         .setSmallIcon(R.drawable.ic_launcher_foreground)
                         .setContentTitle(
-                            pkgContext.getString(R.string.notif_confirm_title, appLabel)
+                            pkgContext.getString(R.string.notif_confirm_title, displayLabel)
                         )
                         .setContentText(pkgContext.getString(R.string.notif_confirm_text))
                         .setAutoCancel(true)
@@ -61,13 +73,22 @@ class InstallStatusReceiver : BroadcastReceiver() {
 
             PackageInstaller.STATUS_SUCCESS -> {
                 Log.i(TAG, "clone install succeeded (session=$sessionId)")
+                if (!mutatedPackage.isNullOrBlank() && targetPackage.isNotBlank()) {
+                    val history = CloneHistoryStore(pkgContext)
+                    history.addClone(
+                        originalPackage = targetPackage,
+                        clonePackage = mutatedPackage,
+                        cloneLabel = displayLabel,
+                        apkPath = apkPath
+                    )
+                }
                 post(
                     notifications,
                     notifId,
                     NotificationCompat.Builder(pkgContext, CloneForgeApp.CHANNEL_INSTALL_JOBS)
                         .setSmallIcon(R.drawable.ic_launcher_foreground)
                         .setContentTitle(
-                            pkgContext.getString(R.string.notif_install_success_title, appLabel)
+                            pkgContext.getString(R.string.notif_install_success_title, displayLabel)
                         )
                         .setContentText(pkgContext.getString(R.string.notif_install_success_text))
                         .setAutoCancel(true)
@@ -76,17 +97,17 @@ class InstallStatusReceiver : BroadcastReceiver() {
                 )
                 CloneBus.post(
                     CloneBus.CloneProgressEvent(
-                        targetPackage = intent.getStringExtra(EXTRA_TARGET_PACKAGE).orEmpty(),
-                        labelPrefix = appLabel,
+                        targetPackage = targetPackage,
+                        labelPrefix = displayLabel,
                         cloneIndex = 0,
                         totalClones = 0,
                         percent = 100,
-                        message = pkgContext.getString(R.string.notif_install_success_title, appLabel),
+                        message = pkgContext.getString(R.string.notif_install_success_title, displayLabel),
                         finished = true,
                         success = true,
-                        mutatedPackage =
-                            intent.getStringExtra(PackageInstaller.EXTRA_OTHER_PACKAGE_NAME),
-                        sessionId = sessionId
+                        mutatedPackage = mutatedPackage,
+                        sessionId = sessionId,
+                        apkPath = apkPath
                     )
                 )
             }
@@ -95,13 +116,25 @@ class InstallStatusReceiver : BroadcastReceiver() {
                 val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
                     ?: pkgContext.getString(R.string.notif_install_failed_generic)
                 Log.w(TAG, "clone install failed (session=$sessionId): $message")
+                if (!mutatedPackage.isNullOrBlank()) {
+                    val history = CloneHistoryStore(pkgContext)
+                    history.removeClone(mutatedPackage)
+                }
+                if (apkPath.isNotBlank()) {
+                    runCatching {
+                        val file = File(apkPath)
+                        if (file.exists()) {
+                            file.parentFile?.deleteRecursively()
+                        }
+                    }
+                }
                 post(
                     notifications,
                     notifId,
                     NotificationCompat.Builder(pkgContext, CloneForgeApp.CHANNEL_INSTALL_JOBS)
                         .setSmallIcon(R.drawable.ic_launcher_foreground)
                         .setContentTitle(
-                            pkgContext.getString(R.string.notif_install_failed_title, appLabel)
+                            pkgContext.getString(R.string.notif_install_failed_title, displayLabel)
                         )
                         .setContentText(message)
                         .setStyle(NotificationCompat.BigTextStyle().bigText(message))
@@ -110,16 +143,17 @@ class InstallStatusReceiver : BroadcastReceiver() {
                 )
                 CloneBus.post(
                     CloneBus.CloneProgressEvent(
-                        targetPackage = intent.getStringExtra(EXTRA_TARGET_PACKAGE).orEmpty(),
-                        labelPrefix = appLabel,
+                        targetPackage = targetPackage,
+                        labelPrefix = displayLabel,
                         cloneIndex = 0,
                         totalClones = 0,
                         percent = -1,
                         message = message,
                         finished = true,
                         success = false,
-                        mutatedPackage = null,
-                        sessionId = sessionId
+                        mutatedPackage = mutatedPackage,
+                        sessionId = sessionId,
+                        apkPath = apkPath
                     )
                 )
             }

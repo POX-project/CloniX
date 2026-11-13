@@ -32,6 +32,8 @@ class ClonePackageInstaller(private val context: Context) {
         signedBaseApk: File,
         signedSplitApks: List<File>,
         silent: Boolean,
+        targetPackage: String = "",
+        appLabel: String = ""
     ): InstallCommit {
         val packageInstaller = context.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(
@@ -39,7 +41,15 @@ class ClonePackageInstaller(private val context: Context) {
         ).apply {
             setAppPackageName(mutatedPackageName)
             if (silent && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+                val isInstalled = try {
+                    context.packageManager.getPackageInfo(mutatedPackageName, 0)
+                    true
+                } catch (_: android.content.pm.PackageManager.NameNotFoundException) {
+                    false
+                }
+                if (isInstalled) {
+                    setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+                }
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 setRequestUpdateOwnership(true)
@@ -64,6 +74,13 @@ class ClonePackageInstaller(private val context: Context) {
                 setPackage(context.packageName)
                 putExtra(CfConstants.EXTRA_MUTATED_PACKAGE, mutatedPackageName)
                 putExtra(CfConstants.EXTRA_SESSION_ID, sessionId)
+                if (targetPackage.isNotBlank()) {
+                    putExtra(CfConstants.EXTRA_TARGET_PACKAGE, targetPackage)
+                }
+                if (appLabel.isNotBlank()) {
+                    putExtra(CfConstants.EXTRA_SESSION_LABEL, appLabel)
+                }
+                putExtra(CfConstants.EXTRA_APK_PATH, signedBaseApk.absolutePath)
             }
 
             // The system attachments EXTRA_STATUS to this PendingIntent, so it

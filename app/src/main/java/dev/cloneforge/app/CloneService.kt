@@ -133,6 +133,13 @@ class CloneService : LifecycleService() {
             }
         } finally {
             withContext(Dispatchers.Main.immediate) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                } else {
+                    @Suppress("DEPRECATION")
+                    stopForeground(true)
+                }
+                notificationManager.cancel(NOTIF_PROGRESS_ID)
                 stopSelfResult(startId)
             }
         }
@@ -228,6 +235,14 @@ class CloneService : LifecycleService() {
                     text = mutated
                 )
             } else {
+                result.apkPath?.let { path ->
+                    runCatching {
+                        val file = java.io.File(path)
+                        if (file.exists()) {
+                            file.parentFile?.deleteRecursively()
+                        }
+                    }
+                }
                 notifyCompletion(
                     notificationId = completionId(result.sessionId, index),
                     title = getString(R.string.notif_clone_failed_title, contentLabel),

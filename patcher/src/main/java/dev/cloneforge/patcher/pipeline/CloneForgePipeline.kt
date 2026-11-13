@@ -220,7 +220,9 @@ class CloneForgePipeline(
                         mutatedPackageName = mutatedPackage,
                         signedBaseApk = savedBaseApk,
                         signedSplitApks = savedSplits,
-                        silent = silent
+                        silent = silent,
+                        targetPackage = targetPackage,
+                        appLabel = appLabel
                     )
                     progress(PROGRESS_DONE, "Clone installation session committed")
                     commit.sessionId
