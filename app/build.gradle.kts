@@ -15,8 +15,8 @@ android {
         applicationId = "dev.cloneforge"
         minSdk = 28
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 6
+        versionName = "1.0.5"
     }
 
     signingConfigs {
@@ -66,6 +66,10 @@ android {
             "META-INF/versions/**"
         )
     }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {
@@ -80,4 +84,8 @@ dependencies {
     implementation(libs.coroutines.android)
     implementation(libs.shizuku.api)
     implementation(libs.shizuku.provider)
+
+    testImplementation(libs.junit)
+    testImplementation(libs.coroutines.test)
+    testImplementation(libs.json)
 }
