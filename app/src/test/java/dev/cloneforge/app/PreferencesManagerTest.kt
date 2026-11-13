@@ -62,8 +62,8 @@ class PreferencesManagerTest {
                     for (i in 0 until 50) {
                         prefsManager.isNumberInNameEnabled = (i % 2 == 0)
                         prefsManager.isAutoHueEnabled = (i % 2 != 0)
-                        val _ = prefsManager.isNumberInNameEnabled
-                        val _ = prefsManager.isAutoHueEnabled
+                        val nameEnabled = prefsManager.isNumberInNameEnabled
+                        val hueEnabled = prefsManager.isAutoHueEnabled
                     }
                 } catch (e: Throwable) {
                     errorCount.incrementAndGet()
