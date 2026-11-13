@@ -9,7 +9,7 @@ import org.json.JSONObject
  * ("orig package", "mutated package", display label serialized as JSON).
  *
  * Backed by SharedPreferences named `<applicationId>-prefs` so the state
- * survives process death and device restarts.
+ * survives process death and device restarts. Thread-safe across instances.
  */
 class CloneHistoryStore(context: Context) {
 
@@ -25,30 +25,46 @@ class CloneHistoryStore(context: Context) {
         Context.MODE_PRIVATE
     )
 
-    /** Adds a clone to the history; re-cloning the same target overwrites the old row. */
+    /** Adds a clone to the history; re-cloning the same target overwrites the old row. Thread-safe. */
     fun addClone(originalPackage: String, clonePackage: String, cloneLabel: String, apkPath: String = "") {
         if (originalPackage.isBlank() || clonePackage.isBlank()) return
-        val existing = clones().filterNot {
-            it.originalPackage == originalPackage && it.clonePackage == clonePackage
+        synchronized(LOCK) {
+            val existing = clonesInternal().filterNot {
+                it.originalPackage == originalPackage && it.clonePackage == clonePackage
+            }
+            val list = mutableListOf(CloneEntry(originalPackage, clonePackage, cloneLabel, apkPath))
+            list.addAll(existing)
+            persistInternal(list.take(MAX_ENTRIES))
         }
-        val list = mutableListOf(CloneEntry(originalPackage, clonePackage, cloneLabel, apkPath))
-        list.addAll(existing)
-        persist(list.take(MAX_ENTRIES))
     }
 
-    /** Removes a clone from the history. */
+    /** Removes a clone from the history. Thread-safe. */
     fun removeClone(clonePackage: String) {
         if (clonePackage.isBlank()) return
-        val existing = clones().filterNot { it.clonePackage == clonePackage }
-        persist(existing)
+        synchronized(LOCK) {
+            val existing = clonesInternal().filterNot { it.clonePackage == clonePackage }
+            persistInternal(existing)
+        }
     }
 
-    fun clones(): List<CloneEntry> = decode(prefs.getString(KEY_CLONES, null))
+    /** Clears all clone history. Thread-safe. */
+    fun clear() {
+        synchronized(LOCK) {
+            prefs.edit().remove(KEY_CLONES).commit()
+        }
+    }
 
-    fun clonesOf(originalPackage: String): List<CloneEntry> =
-        clones().filter { it.originalPackage == originalPackage }
+    fun clones(): List<CloneEntry> = synchronized(LOCK) {
+        clonesInternal()
+    }
 
-    private fun persist(entries: List<CloneEntry>) {
+    fun clonesOf(originalPackage: String): List<CloneEntry> = synchronized(LOCK) {
+        clonesInternal().filter { it.originalPackage == originalPackage }
+    }
+
+    private fun clonesInternal(): List<CloneEntry> = decode(prefs.getString(KEY_CLONES, null))
+
+    private fun persistInternal(entries: List<CloneEntry>) {
         val arr = JSONArray()
         for (e in entries) {
             arr.put(
@@ -59,7 +75,7 @@ class CloneHistoryStore(context: Context) {
                     .put(KEY_APK_PATH, e.apkPath)
             )
         }
-        prefs.edit().putString(KEY_CLONES, arr.toString()).apply()
+        prefs.edit().putString(KEY_CLONES, arr.toString()).commit()
     }
 
     private fun decode(raw: String?): List<CloneEntry> {
@@ -81,12 +97,13 @@ class CloneHistoryStore(context: Context) {
         }
     }
 
-    private companion object {
-        const val KEY_CLONES = "clones"
-        const val KEY_ORIG = "orig"
-        const val KEY_PKG = "pkg"
-        const val KEY_LABEL = "label"
-        const val KEY_APK_PATH = "apk_path"
-        const val MAX_ENTRIES = 1024
+    companion object {
+        private val LOCK = Any()
+        private const val KEY_CLONES = "clones"
+        private const val KEY_ORIG = "orig"
+        private const val KEY_PKG = "pkg"
+        private const val KEY_LABEL = "label"
+        private const val KEY_APK_PATH = "apk_path"
+        private const val MAX_ENTRIES = 1024
     }
 }
