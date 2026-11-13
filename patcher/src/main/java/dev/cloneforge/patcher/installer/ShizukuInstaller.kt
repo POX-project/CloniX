@@ -224,8 +224,7 @@ object ShizukuInstaller {
             outThread.join(15_000)
 
             val writeExit = proc.waitFor()
-            val writeOut = (outBuilder.toString() + "
-" + errBuilder.toString()).trim()
+            val writeOut = (outBuilder.toString() + "\n" + errBuilder.toString()).trim()
             if (writeExit != 0 || writeOut.contains("Failure")) {
                 Log.e(TAG, "Failed writing $splitName (exit=$writeExit): $writeOut")
                 false
