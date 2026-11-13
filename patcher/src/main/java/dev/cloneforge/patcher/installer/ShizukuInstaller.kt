@@ -87,8 +87,16 @@ object ShizukuInstaller {
                 null,
                 null
             )
-            val createOut = createProc.inputStream.bufferedReader().readText()
-            val createExit = createProc.waitFor()
+            val createOut: String
+            val createExit: Int
+            try {
+                val outText = createProc.inputStream.bufferedReader().readText()
+                val errText = createProc.errorStream.bufferedReader().readText()
+                createExit = createProc.waitFor()
+                createOut = (outText + " " + errText).trim()
+            } finally {
+                runCatching { createProc.destroy() }
+            }
 
             if (createExit != 0) {
                 Log.e(TAG, "pm install-create failed (exit=$createExit): $createOut")
@@ -127,8 +135,16 @@ object ShizukuInstaller {
                     null,
                     null
                 )
-                val commitOut = commitProc.inputStream.bufferedReader().readText()
-                val commitExit = commitProc.waitFor()
+                val commitOut: String
+                val commitExit: Int
+                try {
+                    val outText = commitProc.inputStream.bufferedReader().readText()
+                    val errText = commitProc.errorStream.bufferedReader().readText()
+                    commitExit = commitProc.waitFor()
+                    commitOut = (outText + " " + errText).trim()
+                } finally {
+                    runCatching { commitProc.destroy() }
+                }
                 Log.i(TAG, "pm install-commit exitCode=$commitExit, output=$commitOut")
                 val success = commitExit == 0 && commitOut.contains("Success")
                 if (!success) {
@@ -167,26 +183,50 @@ object ShizukuInstaller {
     }
 
     private fun streamApkToSession(sessionId: String, splitName: String, apkFile: File): Boolean {
+        var writeProc: Process? = null
         return runCatching {
             val fileSize = apkFile.length()
             Log.i(TAG, "Streaming $splitName ($fileSize bytes) into session $sessionId...")
-            val writeProc = newProcess(
+            val proc = newProcess(
                 arrayOf("pm", "install-write", "-S", fileSize.toString(), sessionId, splitName, "-"),
                 null,
                 null
             )
+            writeProc = proc
 
-            // Pipe APK bytes into process stdin
-            writeProc.outputStream.use { out ->
+            val errBuilder = StringBuilder()
+            val outBuilder = StringBuilder()
+            val errThread = Thread {
+                runCatching {
+                    proc.errorStream.bufferedReader().useLines { ls ->
+                        ls.forEach { errBuilder.appendLine(it) }
+                    }
+                }
+            }
+            val outThread = Thread {
+                runCatching {
+                    proc.inputStream.bufferedReader().useLines { ls ->
+                        ls.forEach { outBuilder.appendLine(it) }
+                    }
+                }
+            }
+            errThread.start()
+            outThread.start()
+
+            proc.outputStream.use { out ->
                 apkFile.inputStream().use { input ->
                     input.copyTo(out, bufferSize = 64 * 1024)
                 }
                 out.flush()
             }
 
-            val writeOut = writeProc.inputStream.bufferedReader().readText()
-            val writeExit = writeProc.waitFor()
-            if (writeExit != 0 || (!writeOut.contains("Success") && writeOut.contains("Failure"))) {
+            errThread.join(15_000)
+            outThread.join(15_000)
+
+            val writeExit = proc.waitFor()
+            val writeOut = (outBuilder.toString() + "
+" + errBuilder.toString()).trim()
+            if (writeExit != 0 || writeOut.contains("Failure")) {
                 Log.e(TAG, "Failed writing $splitName (exit=$writeExit): $writeOut")
                 false
             } else {
@@ -196,9 +236,10 @@ object ShizukuInstaller {
         }.getOrElse { t ->
             Log.e(TAG, "Exception streaming $splitName to session $sessionId", t)
             false
+        }.also {
+            runCatching { writeProc?.destroy() }
         }
     }
-
     private fun abandonSession(sessionId: String) {
         runCatching {
             val abandonProc = newProcess(
@@ -206,7 +247,11 @@ object ShizukuInstaller {
                 null,
                 null
             )
-            abandonProc.waitFor()
+            try {
+                abandonProc.waitFor()
+            } finally {
+                runCatching { abandonProc.destroy() }
+            }
         }
     }
 }

@@ -486,7 +486,7 @@ class ManifestAndArscMutator {
                             ?: el.searchAttributeByName(NAME_ACCOUNT_TYPE)
                         val oldType = typeAttr?.valueAsString
                         if (!oldType.isNullOrBlank()) {
-                            val newType = if (oldType.contains(cloneSuffix)) oldType else "$oldType.$cloneSuffix"
+                            val newType = if (oldType.endsWith("." + cloneSuffix)) oldType else "$oldType.$cloneSuffix"
                             accountTypeMap[oldType] = newType
                             typeAttr.setValueAsString(newType)
                             modified = true
@@ -499,7 +499,7 @@ class ManifestAndArscMutator {
                         val oldAuth = authAttr?.valueAsString
                         if (!oldAuth.isNullOrBlank()) {
                             val newAuth = authorityMap[oldAuth]
-                                ?: if (oldAuth.contains(cloneSuffix)) oldAuth else "$oldAuth.$cloneSuffix"
+                                ?: if (oldAuth.endsWith("." + cloneSuffix)) oldAuth else "$oldAuth.$cloneSuffix"
                             authorityMap[oldAuth] = newAuth
                             authAttr.setValueAsString(newAuth)
                             modified = true
@@ -512,7 +512,7 @@ class ManifestAndArscMutator {
                         val oldAuth = authAttr?.valueAsString
                         if (!oldAuth.isNullOrBlank()) {
                             val newAuth = authorityMap[oldAuth]
-                                ?: if (oldAuth.contains(cloneSuffix)) oldAuth else "$oldAuth.$cloneSuffix"
+                                ?: if (oldAuth.endsWith("." + cloneSuffix)) oldAuth else "$oldAuth.$cloneSuffix"
                             authorityMap[oldAuth] = newAuth
                             authAttr.setValueAsString(newAuth)
                             modified = true
