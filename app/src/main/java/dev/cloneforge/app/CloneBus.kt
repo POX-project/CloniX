@@ -31,11 +31,11 @@ object CloneBus {
     )
 
     private val _events = MutableSharedFlow<CloneProgressEvent>(
-        replay = 4,
+        replay = 0,
         extraBufferCapacity = 64
     )
 
-    /** Hot stream of progress/finish events; late collectors get the last 4 events. */
+    /** Hot stream of progress/finish events. */
     val events: SharedFlow<CloneProgressEvent> = _events
 
     private val _latest = MutableStateFlow<CloneProgressEvent?>(null)
@@ -50,5 +50,6 @@ object CloneBus {
 
     fun clear() {
         _latest.value = null
+        _events.resetReplayCache()
     }
 }

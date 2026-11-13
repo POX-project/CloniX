@@ -28,22 +28,28 @@ class CloneHistoryStore(context: Context) {
     /** Adds a clone to the history; re-cloning the same target overwrites the old row. */
     fun addClone(originalPackage: String, clonePackage: String, cloneLabel: String, apkPath: String = "") {
         if (originalPackage.isBlank() || clonePackage.isBlank()) return
-        val existing = clones().filterNot {
-            it.originalPackage == originalPackage && it.clonePackage == clonePackage
+        synchronized(LOCK) {
+            val existing = clones().filterNot {
+                it.originalPackage == originalPackage && it.clonePackage == clonePackage
+            }
+            val list = mutableListOf(CloneEntry(originalPackage, clonePackage, cloneLabel, apkPath))
+            list.addAll(existing)
+            persist(list.take(MAX_ENTRIES))
         }
-        val list = mutableListOf(CloneEntry(originalPackage, clonePackage, cloneLabel, apkPath))
-        list.addAll(existing)
-        persist(list.take(MAX_ENTRIES))
     }
 
     /** Removes a clone from the history. */
     fun removeClone(clonePackage: String) {
         if (clonePackage.isBlank()) return
-        val existing = clones().filterNot { it.clonePackage == clonePackage }
-        persist(existing)
+        synchronized(LOCK) {
+            val existing = clones().filterNot { it.clonePackage == clonePackage }
+            persist(existing)
+        }
     }
 
-    fun clones(): List<CloneEntry> = decode(prefs.getString(KEY_CLONES, null))
+    fun clones(): List<CloneEntry> = synchronized(LOCK) {
+        decode(prefs.getString(KEY_CLONES, null))
+    }
 
     fun clonesOf(originalPackage: String): List<CloneEntry> =
         clones().filter { it.originalPackage == originalPackage }
@@ -59,7 +65,7 @@ class CloneHistoryStore(context: Context) {
                     .put(KEY_APK_PATH, e.apkPath)
             )
         }
-        prefs.edit().putString(KEY_CLONES, arr.toString()).apply()
+        prefs.edit().putString(KEY_CLONES, arr.toString()).commit()
     }
 
     private fun decode(raw: String?): List<CloneEntry> {
@@ -82,6 +88,7 @@ class CloneHistoryStore(context: Context) {
     }
 
     private companion object {
+        private val LOCK = Any()
         const val KEY_CLONES = "clones"
         const val KEY_ORIG = "orig"
         const val KEY_PKG = "pkg"
