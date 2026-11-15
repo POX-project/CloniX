@@ -16,6 +16,9 @@ object CfConstants {
     /** Extra keys delivered with [INSTALL_COMMIT_ACTION]. */
     const val EXTRA_MUTATED_PACKAGE = "mutated_pkg"
     const val EXTRA_SESSION_ID = "session_id"
+    const val EXTRA_SESSION_LABEL = "session_label"
+    const val EXTRA_TARGET_PACKAGE = "target_package"
+    const val EXTRA_APK_PATH = "apk_path"
     const val EXTRA_STATUS = "status"
     const val EXTRA_STATUS_MESSAGE = "statusMessage"
 
