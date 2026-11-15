@@ -31,7 +31,7 @@ object CloneBus {
     )
 
     private val _events = MutableSharedFlow<CloneProgressEvent>(
-        replay = 4,
+        replay = 0,
         extraBufferCapacity = 64
     )
 
@@ -50,5 +50,6 @@ object CloneBus {
 
     fun clear() {
         _latest.value = null
+        _events.resetReplayCache()
     }
 }
