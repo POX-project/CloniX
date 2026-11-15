@@ -3,7 +3,6 @@ package dev.cloneforge.app
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.appcompat.app.AppCompatDelegate
-import dev.cloneforge.patcher.installer.RootHelper
 
 class PreferencesManager(context: Context) {
 
@@ -34,11 +33,11 @@ class PreferencesManager(context: Context) {
         set(value) = prefs.edit().putBoolean(KEY_BADGE_ICONS, value).apply()
 
     var isShizukuInstallEnabled: Boolean
-        get() = prefs.getBoolean(KEY_SHIZUKU_INSTALL, dev.cloneforge.patcher.installer.ShizukuInstaller.isShizukuPermissionGranted())
+        get() = prefs.getBoolean(KEY_SHIZUKU_INSTALL, false)
         set(value) = prefs.edit().putBoolean(KEY_SHIZUKU_INSTALL, value).apply()
 
     var isRootInstallEnabled: Boolean
-        get() = prefs.getBoolean(KEY_ROOT_INSTALL, RootHelper.isRootAvailable())
+        get() = prefs.getBoolean(KEY_ROOT_INSTALL, false)
         set(value) = prefs.edit().putBoolean(KEY_ROOT_INSTALL, value).apply()
 
     fun applyTheme() {

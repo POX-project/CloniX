@@ -608,46 +608,52 @@ class MainActivity : AppCompatActivity() {
         switchPrefHue.isChecked = prefs.isAutoHueEnabled
         switchPrefBadge.isChecked = prefs.isBadgeIconsEnabled
 
-        val hasShizukuRunning = ShizukuInstaller.isShizukuAvailable()
-        val hasShizukuGranted = ShizukuInstaller.isShizukuPermissionGranted()
-        when {
-            hasShizukuGranted -> {
-                tvShizukuStatus.text = getString(R.string.shizuku_status_authorized)
-                tvShizukuStatus.setTextColor(Color.parseColor("#4CAF50"))
-                ivShizukuStatusIcon.imageTintList = ColorStateList.valueOf(Color.parseColor("#4CAF50"))
-                switchPrefShizuku.isEnabled = true
-                switchPrefShizuku.isChecked = prefs.isShizukuInstallEnabled
-            }
-            hasShizukuRunning -> {
-                tvShizukuStatus.text = getString(R.string.shizuku_status_permission_needed)
-                tvShizukuStatus.setTextColor(Color.parseColor("#FF9800"))
-                ivShizukuStatusIcon.imageTintList = ColorStateList.valueOf(Color.parseColor("#FF9800"))
-                switchPrefShizuku.isEnabled = false
-                switchPrefShizuku.isChecked = false
-            }
-            else -> {
-                tvShizukuStatus.text = getString(R.string.shizuku_status_not_running)
-                tvShizukuStatus.setTextColor(Color.GRAY)
-                ivShizukuStatusIcon.imageTintList = ColorStateList.valueOf(Color.GRAY)
-                switchPrefShizuku.isEnabled = false
-                switchPrefShizuku.isChecked = false
-            }
-        }
-
+        switchPrefShizuku.isChecked = prefs.isShizukuInstallEnabled
         switchPrefRoot.isChecked = prefs.isRootInstallEnabled
 
-        val hasRoot = RootHelper.isRootAvailable()
-        if (hasRoot) {
-            tvRootStatus.text = getString(R.string.root_status_granted)
-            tvRootStatus.setTextColor(Color.parseColor("#4CAF50"))
-            ivRootStatusIcon.imageTintList = ColorStateList.valueOf(Color.parseColor("#4CAF50"))
-            switchPrefRoot.isEnabled = true
-        } else {
-            tvRootStatus.text = getString(R.string.root_status_not_granted)
-            tvRootStatus.setTextColor(Color.GRAY)
-            ivRootStatusIcon.imageTintList = ColorStateList.valueOf(Color.GRAY)
-            switchPrefRoot.isEnabled = false
-            switchPrefRoot.isChecked = false
+        lifecycleScope.launch(Dispatchers.IO) {
+            val hasShizukuRunning = ShizukuInstaller.isShizukuAvailable()
+            val hasShizukuGranted = ShizukuInstaller.isShizukuPermissionGranted()
+            val hasRoot = RootHelper.isRootAvailable()
+
+            withContext(Dispatchers.Main) {
+                when {
+                    hasShizukuGranted -> {
+                        tvShizukuStatus.text = getString(R.string.shizuku_status_authorized)
+                        tvShizukuStatus.setTextColor(Color.parseColor("#4CAF50"))
+                        ivShizukuStatusIcon.imageTintList = ColorStateList.valueOf(Color.parseColor("#4CAF50"))
+                        switchPrefShizuku.isEnabled = true
+                        switchPrefShizuku.isChecked = prefs.isShizukuInstallEnabled
+                    }
+                    hasShizukuRunning -> {
+                        tvShizukuStatus.text = getString(R.string.shizuku_status_permission_needed)
+                        tvShizukuStatus.setTextColor(Color.parseColor("#FF9800"))
+                        ivShizukuStatusIcon.imageTintList = ColorStateList.valueOf(Color.parseColor("#FF9800"))
+                        switchPrefShizuku.isEnabled = false
+                        switchPrefShizuku.isChecked = false
+                    }
+                    else -> {
+                        tvShizukuStatus.text = getString(R.string.shizuku_status_not_running)
+                        tvShizukuStatus.setTextColor(Color.GRAY)
+                        ivShizukuStatusIcon.imageTintList = ColorStateList.valueOf(Color.GRAY)
+                        switchPrefShizuku.isEnabled = false
+                        switchPrefShizuku.isChecked = false
+                    }
+                }
+
+                if (hasRoot) {
+                    tvRootStatus.text = getString(R.string.root_status_granted)
+                    tvRootStatus.setTextColor(Color.parseColor("#4CAF50"))
+                    ivRootStatusIcon.imageTintList = ColorStateList.valueOf(Color.parseColor("#4CAF50"))
+                    switchPrefRoot.isEnabled = true
+                } else {
+                    tvRootStatus.text = getString(R.string.root_status_not_granted)
+                    tvRootStatus.setTextColor(Color.GRAY)
+                    ivRootStatusIcon.imageTintList = ColorStateList.valueOf(Color.GRAY)
+                    switchPrefRoot.isEnabled = false
+                    switchPrefRoot.isChecked = false
+                }
+            }
         }
 
         updateCacheSummary()
